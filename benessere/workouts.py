@@ -25,6 +25,7 @@ class Workout:
     notes: str = ""
     source: str = "manuale"
     id: int | None = None
+    start_time: str | None = None
 
 
 def estimate_hr_max(conn: sqlite3.Connection) -> int | None:
@@ -76,10 +77,13 @@ def add_workout(conn: sqlite3.Connection, w: Workout) -> int:
         raise ValueError(f"tipo sessione non valido: {w.type} (validi: {sorted(VALID_TYPES)})")
     if not w.source.startswith("zepp"):
         w.load = compute_load(conn, w.type, w.duration_min, w.rpe, w.avg_hr)
+    from . import workout_details
+    workout_details.initialize(conn)
+    clock=workout_details.start_time_string(w.start_time) if w.start_time is not None else None
     cur = conn.execute(
-        "INSERT INTO workouts(date, type, duration_min, avg_hr, max_hr, rpe, load, notes, source) "
-        "VALUES(?,?,?,?,?,?,?,?,?)",
-        (w.date, w.type, w.duration_min, w.avg_hr, w.max_hr, w.rpe, w.load, w.notes, w.source),
+        "INSERT INTO workouts(date, type, duration_min, avg_hr, max_hr, rpe, load, notes, source, start_time) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (w.date, w.type, w.duration_min, w.avg_hr, w.max_hr, w.rpe, w.load, w.notes, w.source, clock),
     )
     conn.commit()
     return int(cur.lastrowid)
