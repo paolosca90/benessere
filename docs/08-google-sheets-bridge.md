@@ -10,11 +10,11 @@ Dopo che lo script e stato pubblicato nel repository, sulla VPS come root esegui
 
     cd /opt/benessere/source && git fetch origin main && git merge --ff-only origin/main && bash deploy/vultr/install_sheets_bridge.sh
 
-Prima di eseguire: questo comando aggiorna il repository locale e lo script crea un backup consistente di SQLite, costruisce e avvia solo il bridge e aggiunge un virtual host Caddy. Se serve attivare il nuovo host, ricrea il SOLO container reverse proxy (breve interruzione delle connessioni web preesistenti); non modifica i container applicativi CreatorOS. Se Git ha modifiche locali, il preflight si interrompe senza forzare. Non inoltrare mai il token letto sulla VPS in questa chat.
+Prima di eseguire: questo comando aggiorna il repository locale e lo script crea un backup consistente di SQLite, riutilizza l'immagine Benessere esistente e avvia solo il bridge e aggiunge un virtual host Caddy. Se serve attivare il nuovo host, ricrea il SOLO container reverse proxy (breve interruzione delle connessioni web preesistenti); non modifica i container applicativi CreatorOS. Se Git ha modifiche locali, il preflight si interrompe senza forzare. Non inoltrare mai il token letto sulla VPS in questa chat.
 
 ## Installazione manuale / riferimento
 1. Eseguire backup di DB e Caddyfile esistenti sulla VPS. Non modificare gli altri container.
-2. Dopo trasferimento dei file, nella directory /opt/benessere/source eseguire: docker build -t benessere-web:20261021 -f deploy/vultr/Dockerfile.web .
+2. Se non esiste l'immagine Docker benessere-web:20261021, ricostruirla in /opt/benessere/source: docker build -t benessere-web:20261021 -f deploy/vultr/Dockerfile.web .
 3. Creare un token casuale di almeno 32 caratteri in /opt/benessere/private/sheets_bridge_token.txt; non inserirlo mai nel codice, in celle del foglio, in chat o nel repo pubblico. Assicurarsi che UID 10001 nel container possa leggerlo, con permessi restrittivi.
 4. Avviare soltanto il servizio: docker compose -f deploy/vultr/compose.web.yml up -d --no-deps benessere-sheets-bridge
 5. Aggiungere il contenuto di deploy/vultr/sheets_bridge.Caddyfile al Caddyfile già in uso (/opt/youtubecreatoros/app/Caddyfile) SENZA sovrascrivere gli host esistenti. Validare e applicare il file effettivamente montato dal container Caddy.
