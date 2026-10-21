@@ -66,12 +66,17 @@ def readiness(conn: sqlite3.Connection, day: date | None = None) -> dict | None:
 
     need_min = (store.profile_get_float(conn, "sleep_need_h", 7.5) or 7.5) * 60
     if sleep:
-        total = (sleep["deep_min"] or 0) + (sleep["light_min"] or 0) + (sleep["rem_min"] or 0)
+        stage_total = (sleep["deep_min"] or 0) + (sleep["light_min"] or 0) + (sleep["rem_min"] or 0)
+        # Health Connect può fornire la durata della sessione senza fasi: è una stima,
+        # NON la convertiamo arbitrariamente in sonno leggero.
+        total = stage_total or (sleep["total_min"] if "total_min" in sleep.keys() else None) or 0
         if total > 0:
+            if not stage_total:
+                flags.append("Durata sonno stimata dalla sessione: fasi non disponibili")
             dur_score = max(0.0, min(100.0, 100 * total / need_min))
             components["sleep"] = dur_score
             debt_rows = conn.execute(
-                "SELECT COALESCE(SUM(deep_min + light_min + rem_min),0) AS t FROM sleeps WHERE night_date > ?",
+                "SELECT COALESCE(SUM(COALESCE(NULLIF(COALESCE(deep_min,0)+COALESCE(light_min,0)+COALESCE(rem_min,0),0),total_min,0)),0) AS t FROM sleeps WHERE night_date > ?",
                 ((day - timedelta(days=7)).isoformat(),),
             ).fetchone()
             week_total = debt_rows["t"] or 0

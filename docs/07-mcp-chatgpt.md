@@ -15,41 +15,29 @@ Allega una foto in chat e chiedi — il modello legge l'immagine, estrae i dati 
 
 Le descrizioni dei tool contengono già queste istruzioni: non serve configurare nulla.
 
-## Avvio del server
+## Avvio del server locale
 
-```bash
-cd C:\Users\Paolo\Desktop\BRAIN\sources\benessere
+Su Windows, fai doppio clic su `AVVIA_BENESSERE.cmd`, oppure esegui nella cartella del progetto:
 
-# Locale (desktop ChatGPT sullo stesso PC):
+```powershell
 python mcp_server.py --http 8000
-#   → http://localhost:8000/mcp
-
-# Esposto per il telefono (tunnel + token), vedi sotto:
-MCP_TOKEN=tua-frase-segreta python mcp_server.py --http 8000
+# Server MCP locale: http://127.0.0.1:8000/mcp
 ```
+
+Questo URL può essere usato da client MCP **installati sul PC**, non direttamente da ChatGPT.
 
 ## Collegamento in ChatGPT
 
-**Importante**: i connettori remoti vengono chiamati dai server di OpenAI, quindi:
-- **ChatGPT desktop sul PC dove gira il server** → `http://localhost:8000/mcp` funziona direttamente
-- **ChatGPT da telefono/browser** → serve un URL pubblico: tunnel `cloudflared` (sotto) + `MCP_TOKEN`
+**Attenzione:** ChatGPT non può raggiungere `localhost`, neppure quando lo usi sul browser del medesimo PC. Il collegamento va effettuato tramite un **Secure MCP Tunnel** compatibile o un endpoint HTTPS remoto autenticato. La disponibilità degli strumenti e delle operazioni di scrittura dipende dal piano e dai permessi del tuo account.
 
-Passi (una volta):
-1. ChatGPT → *Impostazioni* → **Connectors** → sezione *Advanced* → attiva **Developer mode**
-2. *Connectors* → **Create** → nome `Benessere` → tipo **MCP server**
-3. URL: `http://localhost:8000/mcp` (desktop) o l'URL del tunnel (telefono)
-4. Se usi `MCP_TOKEN`: in autenticazione scegli **Bearer token** e incolla la stessa frase
-5. In una chat nuova: attiva Developer mode nel selettore strumenti → spunta il connettore **Benessere**
+1. Verifica di avere l'autorizzazione a collegare un server MCP personalizzato.
+2. In **Plugin → + → Aggiungi server MCP personalizzato** (quando disponibile), configura il tunnel sicuro oppure l'URL HTTPS del server e l'autenticazione.
+3. Controlla gli strumenti rilevati e autorizza solo le operazioni necessarie.
+4. Esegui una prima prova di sola lettura (`today_snapshot`) prima di usare le funzioni di scrittura.
 
-### Tunnel per l'uso da telefono (10 minuti, una volta)
+La modalità alternativa **Quick Tunnel Cloudflare** crea un URL accessibile da Internet: **non usarla senza prima verificare correttamente autenticazione, policy e protezione dei dati sanitari**. Il server prevede `MCP_TOKEN` (variabile d'ambiente) per proteggere l'accesso quando necessario, ma non installa/configura automaticamente alcun tunnel. Non pubblicare token o export del database.
 
-```bash
-winget install Cloudflare.cloudflared        # oppure scarica cloudflared.exe
-cloudflared tunnel --url http://localhost:8000
-#   → stampa un URL https://…trycloudflare.com : usalo come URL del connettore
-```
-
-Con `MCP_TOKEN` attivo, il server risponde 401 a chiunque non presenti il token — verificato con test (401 senza / 200 con). Chiudi il tunnel quando non serve.
+Istruzioni ufficiali aggiornate: https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt
 
 ## Claude Desktop (stdio, opzionale)
 
@@ -66,7 +54,7 @@ Con `MCP_TOKEN` attivo, il server risponde 401 a chiunque non presenti il token 
 }
 ```
 
-## I 14 tool
+## I 15 tool
 
 | Tool | Cosa fa |
 |---|---|

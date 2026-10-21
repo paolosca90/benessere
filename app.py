@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from benessere import db as store
-from benessere import ingest, nutrition, readiness, reminders, seed_wods, workouts, wods
+from benessere import health_sync, ingest, nutrition, readiness, reminders, seed_wods, workouts, wods
 
 st.set_page_config(page_title="Benessere — CrossFit", page_icon="🏋️", layout="wide")
 
@@ -320,6 +320,27 @@ elif page == "🍽️ Alimentazione":
 elif page == "⚙️ Impostazioni":
     st.title("Impostazioni")
 
+    st.subheader("Stato attivazione")
+    st.success("Dashboard locale attiva")
+    st.caption("Avvio rapido Windows: AVVIA_BENESSERE.cmd · Guida: docs/09-attivazione.md")
+    sensor_counts = {
+        "Notti di sonno": conn.execute("SELECT COUNT(*) FROM sleeps").fetchone()[0],
+        "Giorni HRV": conn.execute("SELECT COUNT(*) FROM hrv_daily").fetchone()[0],
+        "Campioni FC": conn.execute("SELECT COUNT(*) FROM hr_samples").fetchone()[0],
+    }
+    st.write(" · ".join(f"{name}: {count}" for name, count in sensor_counts.items()))
+    if not any(sensor_counts.values()):
+        st.warning("Dati dello strap non ancora importati nel database PC. Attiva Zepp sotto o usa il log manuale.")
+    st.subheader("Stato sincronizzazione Android")
+    hc_status = health_sync.status(conn)
+    if hc_status["last_sync"]:
+        st.success(f"Ultimo invio dal telefono: {hc_status['last_sync']}")
+        st.caption(f"Nuove FC ultimo invio: {hc_status['last_new_hr']} · Sessioni Health Connect conservate: {hc_status['stored_sessions']}")
+    else:
+        st.info("Nessun invio Health Connect ricevuto dal telefono. Installa Benessere 0.2 e avvia il server di sync.")
+    st.code("python sync_server.py --lan", language="bash")
+    st.caption("Il server di sincronizzazione usa la porta 8766 e un token separato. HTTP è adatto solo a una Wi-Fi privata fidata; per la VPS usa HTTPS. Guida: docs/10-sync-android.md")
+
     st.subheader("Profilo")
     with st.form("profile_form"):
         c1, c2, c3, c4 = st.columns(4)
@@ -351,8 +372,9 @@ elif page == "⚙️ Impostazioni":
                 st.error(str(exc))
 
     st.subheader("Collega a ChatGPT / Claude (MCP)")
-    st.code("python mcp_server.py --http 8000   # poi in ChatGPT: Connettori → http://localhost:8000/mcp", language="bash")
-    st.markdown("Guida completa: `docs/07-mcp-chatgpt.md`")
+    st.code("python mcp_server.py --http 8000", language="bash")
+    st.info("Il server su localhost è utilizzabile dai client MCP locali. ChatGPT richiede un tunnel sicuro o un endpoint HTTPS remoto autenticato: non può collegarsi direttamente a localhost.")
+    st.markdown("Guida: `docs/07-mcp-chatgpt.md` · Attivazione: `docs/09-attivazione.md`")
 
     st.subheader("Dati")
     dbp = store.db_path()

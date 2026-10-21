@@ -4,24 +4,20 @@ Sistema **local-first** che trasforma i dati dell'Amazfit Helio Strap (e il tuo 
 
 1. **Web app locale** (Streamlit) — le quattro aree: Oggi, Allenamenti, WOD, Alimentazione
 2. **Server MCP** — collega i tuoi dati a **ChatGPT/Claude**, in lettura *e scrittura*
-3. **App Android** (`app-android/`) — collegamento al device: Health Connect, BLE Huami, sveglia intelligente
+3. **App Android** (`app-android/`) — Health Connect, invio automatico (ove supportato) al backend, BLE Huami sperimentale e sveglia
 
 ## Avvio rapido
 
+**Windows:** doppio clic su `AVVIA_BENESSERE.cmd` (apre la dashboard e il server MCP locale, senza duplicare quelli attivi).
+
 ```bash
-pip install -r requirements.txt
-
-# 1. l'app
-streamlit run app.py            # → http://localhost:8501
-
-# 2. il collegamento a ChatGPT (in un altro terminale)
-python mcp_server.py --http 8000
-#    ChatGPT: Impostazioni → Connectors → Developer mode → Create → http://localhost:8000/mcp
-#    Guida completa e prompt d'esempio: docs/07-mcp-chatgpt.md
-
-# 3. i test
+python -m pip install -r requirements.txt
+python -m streamlit run app.py   # http://127.0.0.1:8501
+python mcp_server.py --http 8000 # per client MCP LOCALI; ChatGPT non raggiunge localhost
 python -m pytest tests/ -q
 ```
+
+Per rendere operativo il flusso con Helio Strap e ChatGPT segui **[09 — Attivazione](docs/09-attivazione.md)**. Per il trasferimento Android → PC/VPS segui **[10 — Sincronizzazione Android](docs/10-sync-android.md)**. Per ChatGPT serve un tunnel MCP sicuro/endpoint remoto supportato, non il semplice URL `localhost`.
 
 ## Le quattro aree
 
@@ -37,12 +33,13 @@ python -m pytest tests/ -q
 Tre canali, il sistema funziona fin da subito col log manuale e si arricchisce a ogni canale attivo:
 
 1. **Cloud Zepp** (storico completo: FC 1 s, HRV, sonno, temperatura) — serve il token una tantum: `docs/04-report-dati.md`. Poi `sync` dall'app o dal tool MCP `sync_zepp`.
-2. **Health Connect** (near real-time) — via app Android in `app-android/`.
+2. **Health Connect** (near real-time) — via app Android in `app-android/`, con invio HTTP su Wi-Fi privata (consenso esplicito) o HTTPS a un backend raggiungibile.
 3. **BLE diretto** (fase 3: sveglia intelligente) — protocollo confermato dall'analisi APK in `docs/06-rea-analisi.md`.
 
 ## Il codice
 
-- [`app-android/`](app-android/README.md) — **la nostra app** (Kotlin + Compose): lettura Health Connect, client BLE Huami, sveglia intelligente L1 — APK precompilato in [`dist/`](dist/benessere-v0.1.0-debug.apk)
+- [`app-android/`](app-android/README.md) — **la nostra app** (Kotlin + Compose): lettura Health Connect, invio backend, client BLE Huami, sveglia L1 — APK 0.2 in [`dist/`](dist/benessere-v0.2.0-debug.apk)
+- [`sync_server.py`](sync_server.py) — backend per il trasferimento autorizzato da Android, porta 8766, con deduplicazione dei dati. Su Windows avvialo con `AVVIA_SYNC_ANDROID.cmd` (solo rete privata).
 - [`app.py`](app.py) — la web app Streamlit (Oggi / Allenamenti / WOD / Alimentazione / Impostazioni)
 - [`mcp_server.py`](mcp_server.py) — server MCP (15 tool) per ChatGPT/Claude, con flusso foto
 - [`benessere/`](benessere/) — core Python: nutrizione, carico allenamento, WOD/PR, readiness, reminder, ingest Zepp
@@ -63,7 +60,7 @@ git clone --depth 1 https://github.com/morluto/rea vendor/rea                   
 - [01 Dispositivo e dati](docs/01-dispositivo-dati.md) · [02 Architettura](docs/02-architettura.md) · [03 Roadmap](docs/03-roadmap.md)
 - [04 Token Zepp](docs/04-report-dati.md) · [05 Tempo reale](docs/05-tempo-reale-app.md)
 - [06 Reverse engineering APK](docs/06-rea-analisi.md) · [07 MCP/ChatGPT con flusso foto](docs/07-mcp-chatgpt.md)
-- [08 Collegare l'app all'Amazfit](docs/08-collegare-amazfit.md)
+- [08 Collegare l'app all'Amazfit](docs/08-collegare-amazfit.md) · [09 Attivazione passo passo](docs/09-attivazione.md) · [10 Sincronizzazione Android](docs/10-sync-android.md)
 
 ## Principi
 

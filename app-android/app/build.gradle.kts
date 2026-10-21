@@ -12,8 +12,8 @@ android {
         applicationId = "com.benessere.app"
         minSdk = 28
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 4
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -51,4 +51,13 @@ dependencies {
     implementation(libs.androidx.health.connect)
     implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.androidx.ui.tooling)
+}
+
+// Copia l'APK nella cartella servita in LAN da `python -m http.server 8001 --directory dist`.
+val debugVersionName = android.defaultConfig.versionName ?: "dev"
+tasks.register<Copy>("exportDebugApk") {
+    dependsOn("assembleDebug")
+    from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
+    into(rootProject.layout.projectDirectory.dir("../dist"))
+    rename { "benessere-v${debugVersionName}-debug.apk" }
 }

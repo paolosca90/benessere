@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS sleeps (
   start TEXT, stop TEXT,
   deep_min INTEGER, light_min INTEGER, rem_min INTEGER, awake_min INTEGER,
   score REAL,
-  source TEXT NOT NULL DEFAULT 'zepp'
+  source TEXT NOT NULL DEFAULT 'zepp',
+  total_min INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS days (
@@ -120,6 +121,10 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    # Migrazione additiva per database già esistenti: non elimina alcun dato.
+    if "total_min" not in {r["name"] for r in conn.execute("PRAGMA table_info(sleeps)")}:
+        conn.execute("ALTER TABLE sleeps ADD COLUMN total_min INTEGER")
+        conn.commit()
     return conn
 
 
