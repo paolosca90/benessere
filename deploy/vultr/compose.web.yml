@@ -19,6 +19,8 @@ services:
       - /tmp:size=64m,mode=1777
     volumes:
       - /opt/benessere/data:/app/data:rw
+      - /opt/benessere/source/app.py:/app/app.py:ro
+      - /opt/benessere/source/benessere:/app/benessere:ro
     working_dir: /app
     command: ["python","-m","streamlit","run","app.py","--server.headless=true","--server.address=0.0.0.0","--server.port=8501","--browser.gatherUsageStats=false","--server.maxUploadSize=10"]
     networks: [existing_proxy]
@@ -42,6 +44,9 @@ services:
       - /tmp:size=32m,mode=1777
     volumes:
       - /opt/benessere/data:/app/data:rw
+      - /opt/benessere/source/benessere:/app/benessere:ro
+      - /opt/benessere/source/mcp_server.py:/app/mcp_server.py:ro
+      - /opt/benessere/source/mcp_remote.py:/app/mcp_remote.py:ro
       - /opt/benessere/private/mcp_token.txt:/run/secrets/mcp_token:ro
     working_dir: /app
     command: ["python","-u","mcp_remote.py"]
@@ -67,6 +72,7 @@ services:
     volumes:
       - /opt/benessere/data:/app/data:rw
       - /opt/benessere/private/sheets_bridge_token.txt:/run/secrets/bridge_token:ro
+      - /opt/benessere/source/benessere:/app/benessere:ro
       - /opt/benessere/source/sheets_bridge.py:/app/sheets_bridge.py:ro
     command: ["python", "-u", "sheets_bridge.py"]
     networks: [existing_proxy]
