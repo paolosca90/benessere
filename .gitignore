@@ -1,0 +1,25 @@
+# segreti e catture
+config.json
+*.har
+*.chlsj
+*.saz
+*.flow
+
+# dati personali (DB locale, log, dump)
+data/
+
+# vendor: toolchain pesante e APK decompilati (comandi di ricostruzione nel README)
+vendor/
+
+# artefatti di build
+app-android/.gradle/
+app-android/app/build/
+app-android/build/
+app-android/local.properties
+**/__pycache__/
+.venv/
+
+# varia
+.video_agent/
+out/
+*.log
