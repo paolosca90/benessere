@@ -5,7 +5,14 @@ Stato: codice locale preparato e test unitari iniziali OK. La sincronizzazione N
 ## Flusso
 ChatGPT scrive una riga nel Google Sheet privato tramite Google Drive. Uno script Google Apps Script ogni 5 minuti invia le righe PENDING via HTTPS autenticato al bridge VPS. Il bridge scrive in SQLite l'allenamento e l'eventuale risultato WOD, oppure il pasto. La chiave evento protegge dai duplicati. Il foglio passa a SAVED dopo risposta positiva; gli errori di validazione diventano ERROR.
 
-## Installazione
+## Installazione assistita (un solo comando SSH)
+Dopo che lo script e stato pubblicato nel repository, sulla VPS come root eseguire:
+
+    cd /opt/benessere/source && git fetch origin main && git merge --ff-only origin/main && bash deploy/vultr/install_sheets_bridge.sh
+
+Prima di eseguire: questo comando aggiorna il repository locale e lo script crea un backup consistente di SQLite, costruisce e avvia solo il bridge e aggiunge un virtual host Caddy. Se serve attivare il nuovo host, ricrea il SOLO container reverse proxy (breve interruzione delle connessioni web preesistenti); non modifica i container applicativi CreatorOS. Se Git ha modifiche locali, il preflight si interrompe senza forzare. Non inoltrare mai il token letto sulla VPS in questa chat.
+
+## Installazione manuale / riferimento
 1. Eseguire backup di DB e Caddyfile esistenti sulla VPS. Non modificare gli altri container.
 2. Dopo trasferimento dei file, nella directory /opt/benessere/source eseguire: docker build -t benessere-web:20261021 -f deploy/vultr/Dockerfile.web .
 3. Creare un token casuale di almeno 32 caratteri in /opt/benessere/private/sheets_bridge_token.txt; non inserirlo mai nel codice, in celle del foglio, in chat o nel repo pubblico. Assicurarsi che UID 10001 nel container possa leggerlo, con permessi restrittivi.
