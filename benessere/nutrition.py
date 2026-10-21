@@ -49,15 +49,23 @@ def training_today(conn: sqlite3.Connection, day: str) -> tuple[bool, list[str]]
     return bool(types), types
 
 
-def compute_targets(conn: sqlite3.Connection, day: date | None = None) -> Targets:
+def profile_missing(conn: sqlite3.Connection) -> list[str]:
+    """Dati necessari al target: nessun valore anagrafico di fantasia."""
+    required = {"sex": "sesso", "weight_kg": "peso", "height_cm": "altezza", "age": "età", "goal": "obiettivo"}
+    return [label for key, label in required.items() if store.profile_get(conn, key) in (None, "")]
+
+
+def compute_targets(conn: sqlite3.Connection, day: date | None = None) -> Targets | None:
+    if profile_missing(conn):
+        return None
     day = day or date.today()
     day_s = day.isoformat()
 
-    sex = store.profile_get(conn, "sex", "m") or "m"
-    weight = store.profile_get_float(conn, "weight_kg", 75.0) or 75.0
-    height = store.profile_get_float(conn, "height_cm", 175.0) or 175.0
-    age = int(store.profile_get_float(conn, "age", 35) or 35)
-    goal = store.profile_get(conn, "goal", "maintain") or "maintain"
+    sex = store.profile_get(conn, "sex")
+    weight = store.profile_get_float(conn, "weight_kg")
+    height = store.profile_get_float(conn, "height_cm")
+    age = int(store.profile_get_float(conn, "age"))
+    goal = store.profile_get(conn, "goal")
 
     bmr = bmr_mifflin(sex, weight, height, age)
     tdee = bmr * 1.2 + avg_active_kcal(conn, day)  # base sedentaria + attività reale media
