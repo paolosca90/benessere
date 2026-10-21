@@ -33,16 +33,29 @@ echo "[OK] Backup consistente creato su VPS."
 # Nuova UI come volumi read-only: niente build, niente modifica a CreatorOS.
 docker compose -f "$COMPOSE" up -d --no-deps --force-recreate \
     benessere-dashboard benessere-mcp benessere-sheets-bridge
-sleep 3
 for name in benessere-dashboard benessere-mcp benessere-sheets-bridge; do
   test "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = "true" || \
       die "Container non in esecuzione: $name. Controlla docker logs --tail 40 $name."
   echo "[OK] $name in esecuzione"
 done
 
-# Test della dashboard in locale nel container, senza password.
-docker exec benessere-dashboard python -c 'import urllib.request; v=urllib.request.urlopen("http://127.0.0.1:8501/_stcore/health",timeout=12); assert v.status==200' \
-  || die "Dashboard non sana. Controlla: docker logs --tail 40 benessere-dashboard"
+# Streamlit può impiegare decine di secondi a inizializzare SQLite e il primo avvio.
+# Non dichiarare errore al primo ConnectionRefused: attendere fino a 90 secondi.
+ready=0
+for attempt in {1..45}; do
+  if docker exec benessere-dashboard python -c 'import urllib.request; v=urllib.request.urlopen("http://127.0.0.1:8501/_stcore/health",timeout=3); assert v.status==200' >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 2
+done
+if test "$ready" -ne 1; then
+  echo "[ERRORE] Dashboard non pronta dopo 90 secondi: diagnosi di avvio."
+  docker inspect --format 'Status={{.State.Status}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}' benessere-dashboard || true
+  docker logs --tail 35 benessere-dashboard || true
+  die "Dashboard non sana. Non modificare il DB: backup pre-aggiornamento già presente."
+fi
+echo "[OK] Health endpoint dashboard HTTP 200"
 
 # Endpoints pubblici protetti (non inviare token).
 code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 -X POST https://bridge-benessere.45-77-66-215.nip.io/bridge/v1/import || true)"
