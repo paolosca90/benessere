@@ -125,8 +125,9 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     if "total_min" not in {r["name"] for r in conn.execute("PRAGMA table_info(sleeps)")}:
         conn.execute("ALTER TABLE sleeps ADD COLUMN total_min INTEGER")
         conn.commit()
-    from . import maxes
+    from . import maxes, workout_details
     maxes.initialize(conn)
+    workout_details.initialize(conn)
     return conn
 
 
