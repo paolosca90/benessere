@@ -159,7 +159,19 @@ class HealthConnectReader(context: Context) {
                 .put("start", s.startTime.toString()).put("end", s.endTime.toString())
                 .put("title", s.title ?: "Attività ${s.exerciseType}"))
         }
+        // I dati biometrici già accessibili sul telefono devono arrivare anche sul server.
+        val oxygen = JSONArray()
+        allRecords<OxygenSaturationRecord>(range, 2000).forEach { s ->
+            oxygen.put(JSONObject().put("ts", s.time.toString())
+                .put("pct", s.percentage.value))
+        }
+        val weights = JSONArray()
+        allRecords<WeightRecord>(range, 2000).forEach { w ->
+            weights.put(JSONObject().put("date", w.time.atZone(zone).toLocalDate().toString())
+                .put("weight_kg", w.weight.inKilograms))
+        }
         return result.put("days", daily).put("heart_rates", heart).put("sessions", sessions)
+            .put("oxygen_saturation", oxygen).put("weights", weights)
     }
 
     suspend fun snapshot(): Snapshot {

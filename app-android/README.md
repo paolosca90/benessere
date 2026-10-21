@@ -41,7 +41,7 @@ Dalla versione 0.1.2 è disponibile una schermata informativa per la richiesta d
 
 ## Trasferimento Android → PC
 
-L'app 0.2.0 invia via HTTP autenticato (LAN privata e consenso esplicito) oppure HTTPS verso un server Benessere sulla porta 8765. Leggi [docs/10-sync-android.md](../docs/10-sync-android.md) per configurazione, limiti e sicurezza. Non trasmette nulla senza un server/token configurati.
+L'app 0.2.0 invia via HTTP autenticato (LAN privata e consenso esplicito) oppure HTTPS verso un server Benessere sulla porta 8765. Leggi [docs/10-sync-android.md](../docs/10-sync-android.md) per configurazione, limiti e sicurezza. Non trasmette nulla senza un server/token configurati. Dalla 0.2.1 il payload di sync include anche **SpO₂** e **peso corporeo** oltre a FC, sonno, sessioni e passi.
 
 ## Prossimi passi
 
