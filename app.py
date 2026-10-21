@@ -66,6 +66,7 @@ def show_session_blocks(workout_id, score_min=None):
             "Serie × reps":reps,
             "Peso":f"{block['weight_kg']:g} kg" if block["weight_kg"] is not None else "—",
             "Durata dichiarata":f"{block['reported_duration_min']:g} min" if block["reported_duration_min"] is not None else "—",
+            "RPE (1–10)":f"{block['rpe']:g}" if block["rpe"] is not None else "—",
             "Note":block["notes"]
         })
     df_view(rows,height=min(500,92+45*len(rows)))
@@ -332,6 +333,7 @@ def training_page():
                 start_offset=tw[0].number_input("Inizio relativo (min)",min_value=0.0,max_value=360.0,value=None)
                 end_offset=tw[1].number_input("Fine relativa (min)",min_value=0.0,max_value=360.0,value=None)
                 duration_block=tw[2].number_input("Durata dichiarata (min)",min_value=0.1,max_value=360.0,value=None)
+                effort=st.number_input("RPE (intensità percepita, 1–10)",min_value=1.0,max_value=10.0,step=0.5,value=None)
                 notes_block=st.text_input("Note sul blocco")
                 if st.form_submit_button("Aggiungi blocco",type="primary"):
                     try:
@@ -340,7 +342,7 @@ def training_page():
                             "sets":sets,"repetitions":reps,"weight_kg":weight,
                             "time_reference":ref,"start_offset_min":start_offset,
                             "end_offset_min":end_offset,
-                            "reported_duration_min":duration_block,"notes":notes_block})
+                            "reported_duration_min":duration_block,"rpe":effort,"notes":notes_block})
                         st.success("Blocco registrato nella sessione esistente.")
                         st.rerun()
                     except ValueError as e:
