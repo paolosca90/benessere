@@ -9,6 +9,15 @@
 - È stato creato un plugin **personale privato** Benessere con manifest MCP a chiave API (Bearer); **la creazione non significa che sia già installato, autenticato o testato nell'interfaccia ChatGPT**. Installazione, connessione e azioni di scrittura sono soggette al supporto del piano e delle policy dell'account. Le connessioni MCP custom con scrittura sono documentate per Business/Enterprise/Edu; su altri piani non presumere supporto pieno. Se il flusso di connessione non supporta il Bearer fisso, serve un'integrazione OAuth 2.1 compatibile, non disabilitare l'autenticazione.
 - Non incollare password o token nelle chat né caricarli sul repository.
 
+### Registrazione da foto: niente TinyFish
+
+Dal 21 ottobre 2026 il plugin personale `benessere-private` versione **0.1.1** ha istruzioni esplicite per usare **esclusivamente** le funzioni MCP per leggere o scrivere; non deve mai usare TinyFish, browser automatici o la dashboard come alternativa. La presenza di un link alla dashboard nella chat **non equivale** a collegare gli strumenti MCP.
+
+Verifica nella nuova conversazione che `@Benessere` mostri davvero i tool `add_wod`, `log_wod_result`, `log_workout` e `log_meal`. Se mancano, **non** tentare di registrare via browser: bisogna completare la connessione/autenticazione MCP nella schermata Plugin, se permessa dal piano. Il server MCP è già stato verificato direttamente con un client autenticato.
+
+**Limite prodotto (ottobre 2026):** secondo la documentazione OpenAI, il supporto a scritture su MCP personalizzati è in beta per Business, Enterprise ed Edu; su ChatGPT Plus la presenza del plugin personale non garantisce queste azioni. Se il piano non consente la connessione MCP con scrittura, si possono eseguire operazioni richieste da ChatGPT mediante il connettore `@DEV` direttamente sul progetto locale e sulla VPS, senza TinyFish. Non aggirare mai l'autenticazione sul server.
+
+
 
 Il server MCP di Benessere espone i tuoi dati come **tool** per ChatGPT: leggere readiness/allenamenti/WOD/PR/nutrizione e **scrivere** (pasti, sessioni, risultati). Da ChatGPT i "plugin" oggi si chiamano **Connettori (MCP)**: il nostro server è esattamente quello.
 
