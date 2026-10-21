@@ -77,14 +77,12 @@ def format_score(score_type: str, value: float) -> str:
 def add_wod(conn: sqlite3.Connection, w: Wod) -> int:
     if w.score_type not in SCORE_TYPES:
         raise ValueError(f"score_type non valido: {w.score_type}")
-    cur = conn.execute(
+    conn.execute(
         "INSERT INTO wods(name, category, score_type, description, custom) VALUES(?,?,?,?,?) "
         "ON CONFLICT(name) DO NOTHING",
         (w.name, w.category, w.score_type, w.description, w.custom),
     )
     conn.commit()
-    if cur.lastrowid:
-        return int(cur.lastrowid)
     row = conn.execute("SELECT id FROM wods WHERE name=?", (w.name,)).fetchone()
     return int(row["id"])
 
