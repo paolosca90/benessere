@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from benessere import db as store
-from benessere import health_sync, housekeeping, ingest, maxes, nutrition, progress_photos, readiness, reminders, seed_wods, workouts, wods
+from benessere import health_metrics, health_sync, housekeeping, ingest, maxes, nutrition, progress_photos, readiness, reminders, seed_wods, workout_details, workouts, wods
 from benessere import ui_theme as ui
 
 st.set_page_config(
@@ -25,19 +25,57 @@ TYPE_LABELS = {
 }
 MEAL_LABELS = {"breakfast": "Colazione", "lunch": "Pranzo", "dinner": "Cena", "snack": "Spuntino"}
 SCORES = {"time": "Tempo", "amrap": "AMRAP", "load": "Carico", "reps": "Ripetizioni"}
-NAV = ("Panoramica", "Allenamenti", "WOD", "Benchmark", "Massimali", "Foto progressi", "Alimentazione", "Impostazioni")
+NAV = ("Panoramica", "Salute", "Allenamenti", "WOD", "Benchmark", "Massimali", "Foto progressi", "Alimentazione", "Impostazioni")
 
 @st.cache_resource
-def get_conn():
-    # I cataloghi benchmark rimangono nel codice; non aggiungiamo record di prova.
-    connection = store.connect()
-    housekeeping.migrate(connection, store.db_path())
+def get_conn(database_file: str):
+    # La cache è separata per percorso DB; evita dati stantii da altri ambienti.
+    from pathlib import Path
+    connection = store.connect(Path(database_file))
+    housekeeping.migrate(connection, Path(database_file))
     return connection
 
-conn = get_conn()
+conn = get_conn(str(store.db_path().resolve()))
 
 def df_view(data, *, height=None):
-    st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True, height=height)
+    opts = {"height": height} if height is not None else {}
+    st.dataframe(pd.DataFrame(data), width="stretch", hide_index=True, **opts)
+
+def show_session_blocks(workout_id, score_min=None):
+    """Cronologia della sessione, con minuti relativi alla sessione o al WOD."""
+    blocks=workout_details.blocks_for(conn,workout_id)
+    if not blocks:
+        return
+    rows=[]
+    for block in blocks:
+        reference=block["time_reference"]
+        start=block["start_offset_min"]
+        stop=block["end_offset_min"]
+        when="Da definire"
+        if start is not None:
+            where="sessione" if reference=="workout" else "WOD" if reference=="wod" else "inizio sconosciuto"
+            when=f"{where} +{start:g}′"
+            if stop is not None:
+                when+=f" → +{stop:g}′"
+        reps=(f"{block['sets']}×{block['repetitions']}" if block["sets"] and block["repetitions"]
+              else f"{block['repetitions']} rep" if block["repetitions"] else "—")
+        rows.append({
+            "Fase":block["label"],
+            "Collocazione":when,
+            "Esercizio":block["exercise"],
+            "Serie × reps":reps,
+            "Peso":f"{block['weight_kg']:g} kg" if block["weight_kg"] is not None else "—",
+            "Durata dichiarata":f"{block['reported_duration_min']:g} min" if block["reported_duration_min"] is not None else "—",
+            "Note":block["notes"]
+        })
+    df_view(rows,height=min(500,92+45*len(rows)))
+    if score_min is None:
+        found=conn.execute("SELECT wr.score_value,w.score_type FROM workouts s JOIN wod_results wr ON s.wod_result_id=wr.id JOIN wods w ON wr.wod_id=w.id WHERE s.id=?",(workout_id,)).fetchone()
+        if found and found["score_type"]=="time":
+            score_min=found["score_value"]/60
+    for warning in workout_details.timeline_warnings(blocks,score_min):
+        st.warning("Orari da verificare: "+warning)
+    st.caption("Partenze relative al WOD: non sono ore assolute della sessione. I tempi dichiarati non vengono trasformati in orari di fine non verificati.")
 
 def mini_totals(day_s):
     return nutrition.day_totals(conn, day_s)
@@ -108,6 +146,17 @@ def overview():
     col1.metric("Sessioni", count)
     col2.metric("Pasti registrati", meals["count"])
     col3.metric("Risultati WOD", result_count)
+    sensor=health_metrics.snapshot(conn, day, 7)
+    ui.section("Sensori e recupero")
+    sleep=sensor["sleep_today"]
+    heart=sensor["last_heart"]
+    activity=sensor["today"]
+    measures=st.columns(3)
+    measures[0].metric("Sonno / sessione",
+                       f"{sleep['duration_h']:.1f} h" if sleep and sleep["duration_h"] is not None else "—")
+    measures[1].metric("Battito rilevato", f"{heart['bpm']} bpm" if heart else "—")
+    measures[2].metric("Passi", f"{activity['steps']:,}" if activity and activity["steps"] is not None else "—")
+    st.caption("Misure osservate, non valori predefiniti. Serie e sincronizzazione nella sezione Salute.")
     ui.section("Alimentazione della giornata")
     plan = targets(day)
     if plan is None:
@@ -140,6 +189,94 @@ def overview():
     with tab1: quick_meal(s)
     with tab2: quick_workout(s)
 
+def health_page():
+    ui.hero("Salute e recupero", "Sonno, frequenza cardiaca, HRV, passi e calorie dal monitoraggio reale.", kicker="HEALTH / MONITORAGGIO")
+    a,b=st.columns([2,1])
+    period=a.selectbox("Intervallo", [7,14,30,90], index=2, format_func=lambda n:f"Ultimi {n} giorni")
+    reference=b.date_input("Fino al",date.today(),key="health_reference")
+    data=health_metrics.snapshot(conn,reference,period)
+    status=data["sync"]
+    if status["last_sync"]:
+        st.success(f"Health Connect collegato · ultimo invio {status['last_sync']} · Ultimi campioni FC importati: {status['last_new_hr']}")
+    else:
+        st.warning("Nessuna sincronizzazione Health Connect registrata sulla VPS. Collega il telefono per ottenere i dati.")
+    ui.section("Valori osservati")
+    hr=data["last_heart"]
+    sleep=data["sleep_today"]
+    daily=data["today"]
+    hrv=data["hrv_today"]
+    tiles=st.columns(4)
+    tiles[0].metric("FC rilevata", f"{hr['bpm']} bpm" if hr else "—")
+    tiles[1].metric("Sonno / sessione", f"{sleep['duration_h']:.1f} h" if sleep and sleep["duration_h"] is not None else "—")
+    tiles[2].metric("Passi", f"{daily['steps']:,}" if daily and daily["steps"] is not None else "—")
+    tiles[3].metric("HRV RMSSD", f"{hrv['rmssd_ms']:.1f} ms" if hrv and hrv["rmssd_ms"] is not None else "—")
+    if hr:st.caption(f"Ultima misura FC nell'intervallo: {hr['at'][:16].replace('T',' ')} · Fonte: {hr['source']}")
+    if sleep and sleep["accuracy"]!="fasi":st.caption("Sonno: durata della sessione a letto, non quantità di sonno effettiva.")
+    ui.section("Copertura del monitoraggio")
+    cc=data["counts"]
+    cols=st.columns(4)
+    for col,label,value in zip(cols,("Giorni attività","Notti sonno","Notti HRV","Campioni FC"),
+                                (cc["days"],cc["sleep_nights"],cc["hrv_nights"],cc["heart_samples"])):
+        col.metric(label,value)
+    tabs=st.tabs(["Battiti","Sonno","Attività","HRV & altre misure"])
+    with tabs[0]:
+        ui.section("Frequenza cardiaca nel tempo")
+        if data["hr_hourly"]:
+            frame=pd.DataFrame(data["hr_hourly"])
+            st.line_chart(frame.set_index("at")[["average_bpm","min_bpm","max_bpm"]],height=260)
+            st.caption("Medie/minimi/massimi dei campioni registrati ogni ora. Non sono una misura continua garantita.")
+        else:ui.empty("Nessun battito importato nell'intervallo. Controlla le autorizzazioni Health Connect.")
+    with tabs[1]:
+        ui.section("Durata rilevata per notte")
+        valid=[r for r in data["sleeps"] if r["duration_h"] is not None]
+        if valid:
+            frame=pd.DataFrame(valid)
+            st.bar_chart(frame.set_index("date")["duration_h"],height=270)
+            st.dataframe(frame[["date","duration_h","accuracy","deep_min","light_min","rem_min","source"]].rename(
+                columns={"date":"Notte","duration_h":"Ore","accuracy":"Tipo misura","deep_min":"Profondo (min)",
+                         "light_min":"Leggero (min)","rem_min":"REM (min)","source":"Fonte"}),
+                hide_index=True,use_container_width=True)
+        else:ui.empty("Nessun dato sonno importato nell'intervallo.")
+    with tabs[2]:
+        ui.section("Movimento e consumo")
+        if data["daily"]:
+            frame=pd.DataFrame(data["daily"])
+            kinds=["steps","active_kcal","total_kcal"]
+            present=[x for x in kinds if frame[x].notna().any()]
+            if present:
+                chosen=st.selectbox("Indicatore",present,format_func=lambda x:{
+                    "steps":"Passi","active_kcal":"Calorie attive","total_kcal":"Calorie totali"}[x])
+                st.bar_chart(frame.set_index("date")[chosen],height=260)
+            st.dataframe(frame.rename(columns={"date":"Data","steps":"Passi",
+                         "active_kcal":"Kcal attive","total_kcal":"Kcal totali",
+                         "resting_hr":"FC a riposo","weight_kg":"Peso (kg)","source":"Fonte"}),
+                         use_container_width=True,hide_index=True)
+        else:ui.empty("Nessuna attività registrata nell'intervallo.")
+    with tabs[3]:
+        ui.section("Variabilità cardiaca (HRV)")
+        if data["hrv"]:
+            frame=pd.DataFrame(data["hrv"])
+            keys=[k for k in ("rmssd_ms","sdnn_ms") if frame[k].notna().any()]
+            if keys:st.line_chart(frame.set_index("date")[keys],height=230)
+            else:ui.empty("Le registrazioni HRV non contengono valori numerici validi.")
+        else:ui.empty("HRV non ancora disponibile. Non viene stimata a partire dai battiti medi.")
+        rr=data["last_spo2"]
+        st.metric("Ultima saturazione registrata",f"{rr['pct']:.0f}%" if rr else "—")
+        if rr:st.caption(f"Fonte: {rr['source']} · {rr['ts']}")
+        if daily and daily["resting_hr"] is not None:
+            st.metric("FC a riposo registrata",f"{daily['resting_hr']} bpm")
+    ui.section("Osservazioni sui dati disponibili")
+    for observation in health_metrics.observations(data):
+        ui.card("Dato / copertura",observation)
+    st.caption("Benessere è uno strumento di monitoraggio personale. Non sostituisce diagnosi, terapie o visite mediche.")
+    with st.expander("Come arrivano i dati / diagnostica"):
+        st.markdown("**Amazfit → Zepp → Health Connect → app Android Benessere → VPS → dashboard.**")
+        st.markdown("Il dispositivo e Zepp devono condividere i dati con Health Connect. "
+                    "L'app Android richiede permessi per FC, sonno, passi e calorie e deve sincronizzare verso l'endpoint Benessere.")
+        st.markdown("Se la sincronizzazione non appare, apri l'app Android, verifica Health Connect e premi **Sincronizza ora**.")
+        st.json({"ultimo_invio":status["last_sync"],"nuovi_campioni_ultimo_invio":status["last_new_hr"],
+                 "sessioni_memorizzate":status["stored_sessions"],"copertura":cc})
+ 
 def training_page():
     ui.hero("Allenamenti", "Sessioni, carichi dichiarati e storico senza dati inventati.", kicker="TRAINING LOG")
     with st.expander("Registra una nuova sessione", expanded=False):
@@ -153,13 +290,15 @@ def training_page():
             cols2=st.columns(2)
             avg=cols2[0].number_input("FC media (opzionale)",min_value=30,max_value=230,value=None)
             maxhr=cols2[1].number_input("FC massima (opzionale)",min_value=30,max_value=240,value=None)
+            start_known=st.checkbox("Orario iniziale conosciuto",value=False)
+            clock=st.time_input("Ora di inizio",value=datetime.strptime("08:00","%H:%M").time()) if start_known else None
             note=st.text_area("Note",placeholder="WOD, ripetizioni, carichi reali...")
             if st.form_submit_button("Salva sessione",type="primary"):
                 if duration is None:
                     st.error("Indica la durata.")
                 else:
                     workouts.add_workout(conn,workouts.Workout(date=dt.isoformat(),type=typ,duration_min=duration,
-                        rpe=rpe,avg_hr=avg,max_hr=maxhr,notes=note))
+                        rpe=rpe,avg_hr=avg,max_hr=maxhr,notes=note,start_time=clock.strftime("%H:%M") if clock else None))
                     st.success("Sessione salvata.")
                     st.rerun()
     ui.section("Andamento del carico")
@@ -173,9 +312,48 @@ def training_page():
     ui.section("Storico sessioni")
     rows=workouts.workouts_between(conn,"1900-01-01","9999-12-31")
     if rows:
-        df_view([{"Data":x["date"],"Tipo":TYPE_LABELS.get(x["type"],x["type"]),"Minuti":x["duration_min"],
+        with st.expander("Aggiungi un blocco a una sessione",expanded=False):
+            with st.form("extra_training_block",clear_on_submit=True):
+                recent=list(reversed(rows[-60:]))
+                rid=st.selectbox("Sessione",list(range(len(recent))),
+                    format_func=lambda i:f"{recent[i]['date']} · {recent[i]['start_time'] or 'ora sconosciuta'} · #{recent[i]['id']}")
+                phase=st.selectbox("Tipologia",["strength","wod","skill","warmup","other"],
+                    format_func=lambda k:{"strength":"Forza","wod":"WOD","skill":"Tecnica",
+                                         "warmup":"Riscaldamento","other":"Altro"}[k])
+                label=st.text_input("Nome blocco",placeholder="Es. EMOM 0'–10' oppure WOD A")
+                exercise=st.text_input("Esercizio",placeholder="Es. Back Squat")
+                part=st.columns(3)
+                sets=part[0].number_input("Serie / round",min_value=1,max_value=1000,value=None)
+                reps=part[1].number_input("Ripetizioni",min_value=1,max_value=10000,value=None)
+                weight=part[2].number_input("Carico kg",min_value=0.5,max_value=1000.0,value=None,step=0.5)
+                ref=st.selectbox("Offset riferito all'inizio di",["unspecified","workout","wod"],
+                    format_func=lambda k:{"unspecified":"Non specificato","workout":"Sessione intera","wod":"WOD"}[k])
+                tw=st.columns(3)
+                start_offset=tw[0].number_input("Inizio relativo (min)",min_value=0.0,max_value=360.0,value=None)
+                end_offset=tw[1].number_input("Fine relativa (min)",min_value=0.0,max_value=360.0,value=None)
+                duration_block=tw[2].number_input("Durata dichiarata (min)",min_value=0.1,max_value=360.0,value=None)
+                notes_block=st.text_input("Note sul blocco")
+                if st.form_submit_button("Aggiungi blocco",type="primary"):
+                    try:
+                        workout_details.append_block(conn,recent[rid]["id"],{
+                            "phase":phase,"label":label,"exercise":exercise,
+                            "sets":sets,"repetitions":reps,"weight_kg":weight,
+                            "time_reference":ref,"start_offset_min":start_offset,
+                            "end_offset_min":end_offset,
+                            "reported_duration_min":duration_block,"notes":notes_block})
+                        st.success("Blocco registrato nella sessione esistente.")
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
+        df_view([{"Data":x["date"],"Inizio":x["start_time"] or "Non registrato",
+                  "Tipo":TYPE_LABELS.get(x["type"],x["type"]),"Durata sessione (min)":x["duration_min"],
                   "RPE":x["rpe"],"Carico":x["load"],"Note":x["notes"],"Origine":x["source"]} for x in reversed(rows)],
                 height=370)
+        for workout in reversed(rows):
+            blocks=workout_details.blocks_for(conn,workout["id"])
+            if blocks:
+                with st.expander(f"{workout['date']} · sessione {workout['start_time'] or 'ora non nota'} · {len(blocks)} blocchi",expanded=False):
+                    show_session_blocks(workout["id"])
     else:ui.empty("Nessun allenamento registrato.")
 
 def personal_wods_page():
@@ -193,6 +371,11 @@ def personal_wods_page():
                 if hist:
                     df_view([{"Data":x["date"],"Punteggio":x["score_display"],"Versione":x["scaling"],
                               "Note":x["notes"]} for x in reversed(hist)])
+                    for result in reversed(hist):
+                        associated=conn.execute("SELECT id,start_time FROM workouts WHERE wod_result_id=?",(result["id"],)).fetchone()
+                        if associated:
+                            st.markdown(f"**Sessione del {result['date']} · inizio {associated['start_time'] or 'non noto'}**")
+                            show_session_blocks(associated["id"],result["score_value"]/60 if item["score_type"]=="time" else None)
     else:ui.empty("Nessun WOD personale. Registra il primo qui sotto.")
     ui.section("Crea un WOD")
     with st.form("create_personal_wod",clear_on_submit=True):
@@ -466,6 +649,7 @@ def settings_page():
 st.markdown('<div class="ben-kicker">BENESSERE · PERSONAL HEALTH HUB</div>',unsafe_allow_html=True)
 page=st.radio("Vai alla sezione",NAV,horizontal=True,label_visibility="collapsed",key="nav")
 if page=="Panoramica":overview()
+elif page=="Salute":health_page()
 elif page=="Allenamenti":training_page()
 elif page=="WOD":personal_wods_page()
 elif page=="Benchmark":benchmark_page()
