@@ -2,8 +2,8 @@
 # Endpoint HTTPS privato: solo POST autenticati arrivano al bridge.
 bridge-benessere.45-77-66-215.nip.io {
     encode gzip
-    @import path /bridge/v1/import
-    handle @import {
+    @bridge_submit path /bridge/v1/import
+    handle @bridge_submit {
         reverse_proxy benessere-sheets-bridge:8010
     }
     respond 404
