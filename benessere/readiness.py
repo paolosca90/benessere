@@ -60,12 +60,15 @@ def readiness(conn: sqlite3.Connection, day: date | None = None) -> dict | None:
     else:
         flags.append("RHR non disponibile")
 
-    # Sonno: durata vs bisogno personale (default 7.5h, profilo sleep_need_h)
+    # Sonno: durata vs fabbisogno personale, solo se dichiarato.
     sleep = conn.execute("SELECT * FROM sleeps WHERE night_date = ?", (day_s,)).fetchone()
     from . import db as store
 
-    need_min = (store.profile_get_float(conn, "sleep_need_h", 7.5) or 7.5) * 60
-    if sleep:
+    sleep_need = store.profile_get_float(conn, "sleep_need_h")
+    need_min = sleep_need * 60 if sleep_need else None
+    if sleep and not need_min:
+        flags.append("Fabbisogno sonno non impostato nel profilo: nessun punteggio sonno stimato")
+    if sleep and need_min:
         stage_total = (sleep["deep_min"] or 0) + (sleep["light_min"] or 0) + (sleep["rem_min"] or 0)
         # Health Connect può fornire la durata della sessione senza fasi: è una stima,
         # NON la convertiamo arbitrariamente in sonno leggero.
