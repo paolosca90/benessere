@@ -1,0 +1,17 @@
+# Aggiungere in coda al Caddyfile ESISTENTE dell'host (non sovrascrivere gli altri siti).
+# Endpoint HTTPS privato: solo POST autenticati arrivano al bridge.
+bridge-benessere.45-77-66-215.nip.io {
+    encode gzip
+    @import path /bridge/v1/import
+    handle @import {
+        reverse_proxy benessere-sheets-bridge:8010
+    }
+    respond 404
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+        Cache-Control "no-store"
+        -Server
+    }
+}
