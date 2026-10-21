@@ -1,5 +1,15 @@
 # 07 — Collegare i dati a ChatGPT via MCP (con flusso foto)
 
+## Installazione Vultr (ottobre 2026)
+
+- **Dashboard web privata:** `https://dashboard-benessere.45-77-66-215.nip.io` con HTTP Basic Auth; nome utente `benessere`, password conservata **solo** in `/opt/benessere/private/dashboard_password.txt` sulla VPS.
+- **MCP remoto autenticato:** `https://mcp-benessere.45-77-66-215.nip.io/mcp`, Bearer separato conservato **solo** in `/opt/benessere/private/mcp_token.txt`.
+- **API Android:** `https://benessere.45-77-66-215.nip.io`. Usa un token diverso.
+- Il server remoto usa `mcp_remote.py` e rende disponibili **14 tool**, inclusi `get_health_overview`, `log_meal`, `add_wod`, `log_workout` e i risultati WOD. Esclude `export_all` e `sync_zepp`. Le foto vengono interpretate dal client ChatGPT, che passa al server solo i dati strutturati: il backend non riceve automaticamente l'immagine.
+- È stato creato un plugin **personale privato** Benessere con manifest MCP a chiave API (Bearer); **la creazione non significa che sia già installato, autenticato o testato nell'interfaccia ChatGPT**. Installazione, connessione e azioni di scrittura sono soggette al supporto del piano e delle policy dell'account. Le connessioni MCP custom con scrittura sono documentate per Business/Enterprise/Edu; su altri piani non presumere supporto pieno. Se il flusso di connessione non supporta il Bearer fisso, serve un'integrazione OAuth 2.1 compatibile, non disabilitare l'autenticazione.
+- Non incollare password o token nelle chat né caricarli sul repository.
+
+
 Il server MCP di Benessere espone i tuoi dati come **tool** per ChatGPT: leggere readiness/allenamenti/WOD/PR/nutrizione e **scrivere** (pasti, sessioni, risultati). Da ChatGPT i "plugin" oggi si chiamano **Connettori (MCP)**: il nostro server è esattamente quello.
 
 ## Flusso foto (il caso d'uso principale)
