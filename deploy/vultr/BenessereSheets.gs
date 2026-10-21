@@ -22,7 +22,7 @@ function syncBenessere() {
       const row = i + 2;
       let state = 'ERROR', message = '';
       try {
-        if (!id || !['meal','workout'].includes(kind)) throw Error('ID/tipo non valido');
+        if (!id || !['meal','workout','max','profile'].includes(kind)) throw Error('ID/tipo non valido');
         const data = JSON.parse(payload);
         const response = UrlFetchApp.fetch(url, {
           method: 'post',
