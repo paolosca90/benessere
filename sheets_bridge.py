@@ -78,7 +78,7 @@ def apply_event(conn, key: str, kind: str, data: dict) -> dict:
         meal = str(data["meal"])
         if meal not in {"breakfast","lunch","dinner","snack"}:
             raise ValueError("tipo pasto non valido")
-        hhmm = str(data.get("time","12:00"))
+        hhmm = str(data["time"])
         tm = datetime.strptime(hhmm,"%H:%M").strftime("%H:%M")
         amounts = [float(data[x]) for x in ("kcal","protein_g","carbs_g","fat_g")]
         import math
