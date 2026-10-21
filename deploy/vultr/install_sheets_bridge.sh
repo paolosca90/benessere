@@ -55,9 +55,12 @@ test "$(wc -c < "$TOKENFILE")" -ge 33 || die "Token esistente troppo breve"
 chown 10001:10001 "$TOKENFILE"
 chmod 0600 "$TOKENFILE"
 
-echo "[1/3] Compilo solo la nuova immagine bridge."
-docker build -q -t benessere-sheets-bridge:20261021 -f "$SOURCE/deploy/vultr/Dockerfile.web" "$SOURCE"
-echo "[2/3] Avvio solo il bridge."
+echo "[1/3] Verifico immagine Benessere esistente."
+if ! docker image inspect benessere-web:20261021 >/dev/null 2>&1; then
+  echo "[INFO] Immagine non presente; ricostruisco la base Benessere."
+  docker build -q -t benessere-web:20261021 -f "$SOURCE/deploy/vultr/Dockerfile.web" "$SOURCE"
+fi
+echo "[2/3] Avvio solo il bridge (senza riavviare backend e dashboard)."
 docker compose -f "$SOURCE/deploy/vultr/compose.web.yml" up -d --no-deps benessere-sheets-bridge
 sleep 2
 test "$(docker inspect -f '{{.State.Running}}' benessere-sheets-bridge)" = true || die "Il container bridge non è avviato."
