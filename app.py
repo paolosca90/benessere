@@ -589,7 +589,15 @@ def food_page():
         quick_meal(s)
 
 def settings_page():
-    ui.hero("Impostazioni", "Profilo personale, sincronizzazioni e controllo dei tuoi dati.",kicker="PREFERENZE")
+    ui.hero("Profilo personale", "Misurazioni, obiettivi e sincronizzazioni. Tutti i valori vengono dai tuoi dati.",kicker="BENESSERE / PROFILO")
+    height_saved=store.profile_get_float(conn,"height_cm")
+    weight_saved=store.profile_get_float(conn,"weight_kg")
+    fat_saved=store.profile_get_float(conn,"body_fat_pct_estimate")
+    cards=st.columns(3)
+    cards[0].metric("Altezza",f"{height_saved:g} cm" if height_saved is not None else "—")
+    cards[1].metric("Peso",f"{weight_saved:g} kg" if weight_saved is not None else "—")
+    cards[2].metric("Massa grassa stimata",f"{fat_saved:g}%" if fat_saved is not None else "—")
+    st.caption("La massa grassa è una stima dichiarata, non una misurazione clinica.")
     missing=nutrition.profile_missing(conn)
     if missing:
         st.info("Completa questi campi per attivare i target nutrizionali: "+", ".join(missing))
@@ -602,8 +610,8 @@ def settings_page():
                                placeholder="Seleziona",format_func=lambda x:{"m":"Maschile","f":"Femminile"}[x])
         age=b.number_input("Età",min_value=14,max_value=100,
                            value=int(store.profile_get_float(conn,"age")) if store.profile_get_float(conn,"age") is not None else None)
-        h=c.number_input("Altezza (cm)",min_value=90,max_value=240,
-                         value=float(store.profile_get_float(conn,"height_cm")) if store.profile_get_float(conn,"height_cm") is not None else None)
+        h=c.number_input("Altezza (cm)",min_value=90.0,max_value=240.0,step=0.5,
+                         value=store.profile_get_float(conn,"height_cm"))
         a,b,c=st.columns(3)
         weight=a.number_input("Peso corporeo (kg)",min_value=20.,max_value=350.,step=.1,
                               value=float(store.profile_get_float(conn,"weight_kg")) if store.profile_get_float(conn,"weight_kg") is not None else None)
