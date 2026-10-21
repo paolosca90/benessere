@@ -47,7 +47,7 @@ services:
     command: ["python","-u","mcp_remote.py"]
     networks: [existing_proxy]
   benessere-sheets-bridge:
-    image: benessere-sheets-bridge:20261021
+    image: benessere-web:20261021
     container_name: benessere-sheets-bridge
     restart: unless-stopped
     user: "10001:10001"
@@ -67,6 +67,7 @@ services:
     volumes:
       - /opt/benessere/data:/app/data:rw
       - /opt/benessere/private/sheets_bridge_token.txt:/run/secrets/bridge_token:ro
+      - /opt/benessere/source/sheets_bridge.py:/app/sheets_bridge.py:ro
     command: ["python", "-u", "sheets_bridge.py"]
     networks: [existing_proxy]
 networks:
