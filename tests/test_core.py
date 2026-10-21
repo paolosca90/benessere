@@ -18,6 +18,8 @@ def conn(tmp_path):
     store.profile_set(conn, "height_cm", "180")
     store.profile_set(conn, "weight_kg", "80")
     store.profile_set(conn, "goal", "cut")
+    store.profile_set(conn, "resting_hr", "55")
+    store.profile_set(conn, "sleep_need_h", "8")
     yield conn
     conn.close()
 
@@ -79,8 +81,8 @@ def test_load_hybrid(conn):
     # strength: durata × rpe × 0.8
     load_str = workouts.compute_load(conn, "strength", 60, rpe=7, avg_hr=None)
     assert load_str == pytest.approx(60 * 7 * 0.8, abs=0.1)
-    # senza FC né RPE: stima prudente
-    assert workouts.compute_load(conn, "metcon", 30, None, None) == pytest.approx(90.0)
+    # Senza FC né RPE nessun carico inventato.
+    assert workouts.compute_load(conn, "metcon", 30, None, None) is None
 
 
 def test_fitness_fatigue_tsb_drops_after_hard_day(conn):
