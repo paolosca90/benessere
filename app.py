@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from benessere import db as store
-from benessere import health_metrics, health_sync, housekeeping, ingest, maxes, nutrition, progress_photos, readiness, reminders, seed_wods, workout_details, workouts, wods
+from benessere import health_metrics, health_sync, housekeeping, ingest, maxes, nutrition, nutrition_schedule, progress_photos, readiness, reminders, seed_wods, workout_details, workouts, wods
 from benessere import ui_theme as ui
 
 st.set_page_config(
@@ -159,11 +159,19 @@ def overview():
     measures[2].metric("Passi", f"{activity['steps']:,}" if activity and activity["steps"] is not None else "—")
     st.caption("Misure osservate, non valori predefiniti. Serie e sincronizzazione nella sezione Salute.")
     ui.section("Alimentazione della giornata")
-    plan = targets(day)
-    if plan is None:
-        missing = ", ".join(nutrition.profile_missing(conn))
-        st.info(f"Profilo da completare per il calcolo dei target: {missing}. I consumi registrati rimangono visibili.")
-    macro_tiles(meals, plan.as_dict() if plan else None)
+    mode_plan=nutrition_schedule.provisional_bulk_target(conn,s)
+    if mode_plan:
+        st.caption(f"Target massa indicativo: {mode_plan['label']}. Nessun doppio conteggio delle kcal del dispositivo.")
+        macro_tiles(meals,mode_plan)
+    else:
+        plan=targets(day) if store.profile_get(conn,"goal")!="bulk" else None
+        if plan is None:
+            if store.profile_get(conn,"goal")=="bulk":
+                st.info("Piano massa: seleziona il tipo di giornata in Alimentazione o registra gli allenamenti reali. Non assumo che i giorni senza dati siano di riposo.")
+            else:
+                missing=", ".join(nutrition.profile_missing(conn))
+                st.info(f"Profilo da completare per il calcolo dei target: {missing}. I consumi registrati rimangono visibili.")
+        macro_tiles(meals,plan.as_dict() if plan else None)
     c1, c2 = st.columns(2, gap="large")
     with c1:
         ui.section("Recupero")
@@ -571,10 +579,37 @@ def food_page():
     day=st.date_input("Giornata",date.today(),key="food_date")
     s=day.isoformat()
     consumed=mini_totals(s)
-    t=targets(day)
-    if t is None:
-        st.info("Target non disponibile: completa peso, altezza, età, sesso e obiettivo nelle Impostazioni.")
-    macro_tiles(consumed,t.as_dict() if t else None)
+    ui.section("Tipo di giornata e piano massa")
+    state=nutrition_schedule.day_mode(conn,s)
+    st.caption("Il tennis non è assegnato automaticamente al sabato. Il tipo di giornata segue gli allenamenti registrati oppure la tua selezione manuale.")
+    with st.form("nutrition_day_mode"):
+        choices=["unspecified"]+[k for k in nutrition_schedule.MODES if k!="unspecified"]
+        chosen=st.selectbox(
+            "Attività della giornata",choices,
+            index=choices.index(state["mode"]) if state["source"]=="manual" else 0,
+            format_func=lambda x:"Automatico dagli allenamenti registrati" if x=="unspecified" else nutrition_schedule.MODES[x],
+        )
+        if st.form_submit_button("Aggiorna tipo giornata",type="primary"):
+            nutrition_schedule.save_mode(conn,s,chosen)
+            st.success("Tipo di giornata aggiornato.")
+            st.rerun()
+    if state["mode"]=="unspecified":
+        st.info("Attività non classificata: registra tennis/CrossFit/pesi, oppure indica manualmente il tipo di giornata. Nessun riposo o tennis inventato.")
+    else:
+        st.caption(f"Riconosciuta: {nutrition_schedule.MODES[state['mode']]} · fonte: {'scelta manuale' if state['source']=='manual' else 'allenamenti registrati'}")
+    goal=store.profile_get(conn,"goal")
+    if goal != "bulk":
+        st.info("Il piano per aumentare massa non è ancora attivo nel profilo. Puoi attivarlo qui o da Profilo personale.")
+        if st.button("Attiva obiettivo massa",key="enable_bulk_nutrition"):
+            store.profile_set(conn,"goal","bulk")
+            st.rerun()
+    plan=nutrition_schedule.provisional_bulk_target(conn,s)
+    if plan:
+        st.caption("Target iniziale indicativo per 81 kg: non è un dispendio misurato e non somma nuovamente le kcal di Health Connect. Da calibrare con le medie del peso e le prestazioni.")
+        macro_tiles(consumed,plan)
+    else:
+        t=targets(day) if goal != "bulk" else None
+        macro_tiles(consumed,t.as_dict() if t else None)
     ui.section("Pasti registrati")
     food=nutrition.meals_for_day(conn,s)
     if food:
