@@ -39,7 +39,8 @@ def today_snapshot() -> str:
     conn = _conn()
     try:
         day_s = date.today().isoformat()
-        targets = nutrition.compute_targets(conn).as_dict()
+        plan = nutrition.compute_targets(conn)
+        targets = plan.as_dict() if plan else None
         eaten = nutrition.day_totals(conn, day_s)
         rem = reminders.pending_meal_reminders(conn)
         ff = workouts.fitness_fatigue(conn, horizon=7)[-1]
@@ -50,8 +51,8 @@ def today_snapshot() -> str:
                 "targets": targets,
                 "eaten": eaten,
                 "remaining": {
-                    "kcal": round(targets["target_kcal"] - eaten["kcal"]),
-                    "protein_g": round(targets["protein_g"] - eaten["protein_g"]),
+                    "kcal": round(targets["target_kcal"] - eaten["kcal"]) if targets else None,
+                    "protein_g": round(targets["protein_g"] - eaten["protein_g"]) if targets else None,
                 },
                 "meal_reminders": rem,
                 "training_load": {"ctl": ff["ctl"], "atl": ff["atl"], "tsb": ff["tsb"]},
@@ -191,7 +192,8 @@ def get_nutrition(date: str = None) -> str:
     conn = _conn()
     try:
         day_s = _d(date)
-        targets = nutrition.compute_targets(conn).as_dict()
+        plan = nutrition.compute_targets(conn, __import__("datetime").date.fromisoformat(day_s))
+        targets = plan.as_dict() if plan else None
         eaten = nutrition.day_totals(conn, day_s)
         return json.dumps(
             {
