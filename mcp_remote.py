@@ -152,6 +152,23 @@ for name in ("list_wods", "add_wod", "log_wod_result", "get_wod_history", "get_p
 
 def main() -> None:
     token = _token()
+    # MCP 1.30 abilita il filtro DNS rebinding per default: autorizziamo
+    # esplicitamente solo il nostro host HTTPS e il nome interno Docker.
+    security = mcp.settings.transport_security
+    security.enable_dns_rebinding_protection = True
+    security.allowed_hosts = [
+        "mcp-benessere.45-77-66-215.nip.io",
+        "mcp-benessere.45-77-66-215.nip.io:443",
+        "benessere-mcp:8000",
+        "127.0.0.1:8000",
+        "localhost:8000",
+    ]
+    security.allowed_origins = [
+        "https://chatgpt.com",
+        "https://chat.openai.com",
+        "https://dashboard-benessere.45-77-66-215.nip.io",
+        "https://mcp-benessere.45-77-66-215.nip.io",
+    ]
     # Il token va letto prima del bind: non avviare senza autenticazione.
     app = mcp.streamable_http_app()
     app.add_middleware(RequireBearer, token=token)
