@@ -89,18 +89,38 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
     day_list = payload.get("days", [])
     hr_list = payload.get("heart_rates", [])
     event_list = payload.get("sessions", [])
+    oxygen_list = payload.get("oxygen_saturation", [])
+    weight_list = payload.get("weights", [])
+    if not isinstance(oxygen_list, list) or len(oxygen_list) > 5000:
+        raise ValueError("troppi campioni SpO2")
+    if not isinstance(weight_list, list) or len(weight_list) > 1000:
+        raise ValueError("troppe misure peso")
     if not isinstance(day_list, list) or len(day_list) > MAX_DAYS:
         raise ValueError("numero giorni non valido")
     if not isinstance(hr_list, list) or len(hr_list) > MAX_SAMPLES:
         raise ValueError("troppi campioni FC")
     if not isinstance(event_list, list) or len(event_list) > MAX_EVENTS:
         raise ValueError("troppe sessioni")
-    if not day_list and not hr_list and not event_list:
+    if not day_list and not hr_list and not event_list and not oxygen_list and not weight_list:
         raise ValueError("payload vuoto")
     updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     # Validazione completa PRIMA di scrivere. Su errore, rollback di tutto il batch.
-    days, heart_rates, sessions = [], [], []
+    days, heart_rates, sessions, oxygen_samples, weights = [], [], [], [], []
+    for measurement in oxygen_list:
+        if not isinstance(measurement,dict):
+            raise ValueError("campione saturazione non valido")
+        pct=_value(measurement.get("pct"),100)
+        if pct is None or pct < 1:
+            raise ValueError("saturazione fuori intervallo")
+        oxygen_samples.append((_iso(measurement.get("ts")),pct))
+    for measurement in weight_list:
+        if not isinstance(measurement,dict):
+            raise ValueError("peso non valido")
+        weight=_value(measurement.get("weight_kg"),350)
+        if weight is None or weight < 20:
+            raise ValueError("peso fuori intervallo")
+        weights.append((_date(measurement.get("date")),weight))
     for d in day_list:
         if not isinstance(d, dict):
             raise ValueError("giorno non valido")
@@ -137,6 +157,12 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
         for ts, bpm in heart_rates:
             conn.execute("INSERT OR IGNORE INTO hr_samples(ts,bpm,source) VALUES(?,?,'health_connect')", (ts, bpm))
         new_hr = conn.total_changes - before_hr
+        for ts, pct in oxygen_samples:
+            conn.execute("INSERT OR IGNORE INTO spo2_samples(ts,pct,source) VALUES(?, ?, 'health_connect')",
+                         (ts,pct))
+        for date_s, weight in weights:
+            conn.execute("""INSERT INTO days(date,weight_kg,source) VALUES(?, ?, 'health_connect')
+                ON CONFLICT(date) DO UPDATE SET weight_kg=excluded.weight_kg""",(date_s,weight))
         for date_s, steps, active, total in days:
             previous_hc = conn.execute(
                 "SELECT steps,active_kcal,total_kcal FROM hc_daily WHERE date=?", (date_s,)
@@ -216,7 +242,8 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
         conn.rollback()
         raise
     return {"status": "ok", "new_hr_samples": new_hr, "received_days": len(days),
-            "received_sessions": len(sessions), "synced_at": updated_at}
+            "received_sessions": len(sessions), "received_spo2": len(oxygen_samples),
+            "received_weights": len(weights), "synced_at": updated_at}
 
 
 def status(conn: sqlite3.Connection) -> dict:
