@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS workout_blocks (
     start_offset_min REAL,
     end_offset_min REAL,
     reported_duration_min REAL,
+    rpe REAL,
     time_reference TEXT NOT NULL DEFAULT 'workout',
     notes TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -36,6 +37,10 @@ def initialize(conn:sqlite3.Connection)->None:
     if "wod_result_id" not in cols:
         conn.execute("ALTER TABLE workouts ADD COLUMN wod_result_id INTEGER")
     conn.executescript(SCHEMA)
+    block_cols={r["name"] for r in conn.execute("PRAGMA table_info(workout_blocks)")}
+    if "rpe" not in block_cols:
+        conn.execute("ALTER TABLE workout_blocks ADD COLUMN rpe REAL")
+        conn.commit()
 
 def normalized_blocks(blocks:list[dict])->list[dict]:
     if not isinstance(blocks,list) or not 1 <= len(blocks) <= 30:
@@ -69,6 +74,12 @@ def normalized_blocks(blocks:list[dict])->list[dict]:
                 if not math.isfinite(v) or v<0 or v>limit or (field in ("weight_kg","reported_duration_min") and v==0):
                     raise ValueError(f"Blocco {index}: {field} fuori intervallo")
             clean[field]=v
+        rpe=b.get("rpe")
+        if rpe is not None:
+            if isinstance(rpe,bool) or not isinstance(rpe,(int,float)) or not math.isfinite(rpe) or not 1<=rpe<=10:
+                raise ValueError(f"Blocco {index}: RPE deve essere tra 1 e 10")
+            rpe=float(rpe)
+        clean["rpe"]=rpe
         if clean["start_offset_min"] is not None and clean["end_offset_min"] is not None:
             if clean["end_offset_min"]<=clean["start_offset_min"]:
                 raise ValueError(f"Blocco {index}: fine prima dell'inizio")
@@ -90,11 +101,11 @@ def replace_blocks_in_transaction(conn:sqlite3.Connection,workout_id:int,blocks:
         conn.execute(
             """INSERT INTO workout_blocks (
             workout_id,position,phase,label,exercise,repetitions,sets,weight_kg,
-            start_offset_min,end_offset_min,reported_duration_min,time_reference,notes
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            start_offset_min,end_offset_min,reported_duration_min,rpe,time_reference,notes
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (workout_id, item["position"],item["phase"],item["label"],item["exercise"],
              item["repetitions"],item["sets"],item["weight_kg"],item["start_offset_min"],
-             item["end_offset_min"],item["reported_duration_min"],item["time_reference"],
+             item["end_offset_min"],item["reported_duration_min"],item["rpe"],item["time_reference"],
              item["notes"])
         )
     return len(clean)
@@ -112,11 +123,11 @@ def append_block(conn:sqlite3.Connection, workout_id:int, block:dict)->int:
         cursor=conn.execute(
             """INSERT INTO workout_blocks(
             workout_id,position,phase,label,exercise,repetitions,sets,weight_kg,
-            start_offset_min,end_offset_min,reported_duration_min,time_reference,notes
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            start_offset_min,end_offset_min,reported_duration_min,rpe,time_reference,notes
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (workout_id,position,item["phase"],item["label"],item["exercise"],
              item["repetitions"],item["sets"],item["weight_kg"],item["start_offset_min"],
-             item["end_offset_min"],item["reported_duration_min"],item["time_reference"],
+             item["end_offset_min"],item["reported_duration_min"],item["rpe"],item["time_reference"],
              item["notes"])
         )
     return int(cursor.lastrowid)
