@@ -27,15 +27,15 @@ class Workout:
     id: int | None = None
 
 
-def estimate_hr_max(conn: sqlite3.Connection, fallback: int = 190) -> int:
+def estimate_hr_max(conn: sqlite3.Connection) -> int | None:
     """FC max funzionale: la più alta osservata nelle sessioni, altrimenti stima età."""
     row = conn.execute("SELECT MAX(max_hr) AS m FROM workouts WHERE max_hr IS NOT NULL").fetchone()
     if row and row["m"]:
         return int(row["m"])
     from . import db as store
 
-    age = int(store.profile_get_float(conn, "age", 35) or 35)
-    return 220 - age if age else fallback
+    age = store.profile_get_float(conn, "age")
+    return int(220 - age) if age is not None else None
 
 
 def compute_load(
@@ -58,16 +58,17 @@ def compute_load(
         hr_max = estimate_hr_max(conn)
         from . import db as store
 
-        rhr = int(store.profile_get_float(conn, "resting_hr", 55) or 55)
-        hrr = max(hr_max - rhr, 30)
-        intensity = (avg_hr - rhr) / hrr
-        intensity = min(max(intensity, 0.1), 1.2)
-        return round(duration_min * intensity * 1.2, 1)
+        rhr = store.profile_get_float(conn, "resting_hr")
+        if hr_max is not None and rhr is not None:
+            hrr = max(hr_max - rhr, 30)
+            intensity = (avg_hr - rhr) / hrr
+            intensity = min(max(intensity, 0.1), 1.2)
+            return round(duration_min * intensity * 1.2, 1)
     if rpe:
         factor = 0.8 if wtype in {"strength", "gymnastics", "skill"} else 0.6
         return round(duration_min * rpe * factor, 1)
-    # nessun RPE: stima neutra prudente
-    return round(duration_min * 3.0, 1)
+    # Nessun dato di intensità reale: non inventare un carico neutro.
+    return None
 
 
 def add_workout(conn: sqlite3.Connection, w: Workout) -> int:
