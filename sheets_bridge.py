@@ -10,7 +10,7 @@ import os
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from benessere import db, nutrition, workouts, wods
+from benessere import db, maxes, nutrition, workouts, wods
 
 MAX_BYTES = 65536
 
@@ -99,6 +99,78 @@ def apply_event(conn, key: str, kind: str, data: dict) -> dict:
                          (ts,meal,str(data.get("description",""))[:1000],*amounts))
             result = {"meal_ts":ts}
             conn.execute("INSERT INTO sheets_bridge_events(event_id,kind,result_json) VALUES(?,?,?)",(key,kind,json.dumps(result)))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    elif kind == "max":
+        import math
+        day = maxes.valid_date(str(data["date"]))
+        lift = str(data["lift"]).strip()
+        weight = float(data["weight_kg"])
+        reps = int(data.get("reps", 1))
+        notes = str(data.get("notes", ""))
+        if not lift or len(lift) > 100:
+            raise ValueError("Esercizio non valido")
+        if not math.isfinite(weight) or not 0 < weight <= 1000:
+            raise ValueError("Peso non valido")
+        if not 1 <= reps <= 100 or len(notes) > 1000:
+            raise ValueError("Ripetizioni o note non valide")
+        category = str(data.get("category", "lift"))
+        if category not in maxes.CATEGORIES:
+            raise ValueError("Categoria massimale non valida")
+        maxes.initialize(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            prior_txn = conn.execute("SELECT result_json FROM sheets_bridge_events WHERE event_id=?", (key,)).fetchone()
+            if prior_txn:
+                conn.rollback()
+                return {"status": "duplicate", "result": json.loads(prior_txn["result_json"])}
+            c = conn.execute(
+                "INSERT INTO strength_maxes(lift,date,weight_kg,reps,notes,source,category) VALUES(?,?,?,?,?,?,?)",
+                (lift,day,weight,reps,notes,"chatgpt_sheets",category),
+            )
+            result = {"max_id": c.lastrowid}
+            conn.execute(
+                "INSERT INTO sheets_bridge_events(event_id,kind,result_json) VALUES(?,?,?)",
+                (key,kind,json.dumps(result)),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    elif kind == "profile":
+        import math
+        limits = {
+            "height_cm": (90, 240),
+            "weight_kg": (20, 350),
+            "body_fat_pct_estimate": (1, 65),
+        }
+        updates = {}
+        for field, value in data.items():
+            if field not in limits:
+                raise ValueError("Proprieta' profilo non supportata")
+            value = float(value)
+            lo, hi = limits[field]
+            if not math.isfinite(value) or not lo <= value <= hi:
+                raise ValueError("Valore profilo fuori intervallo")
+            updates[field] = value
+        if not updates:
+            raise ValueError("Nessun dato profilo")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            already = conn.execute("SELECT result_json FROM sheets_bridge_events WHERE event_id=?", (key,)).fetchone()
+            if already:
+                conn.rollback()
+                return {"status":"duplicate","result":json.loads(already["result_json"])}
+            for k, value in updates.items():
+                conn.execute(
+                    "INSERT INTO profile(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (k,str(value)),
+                )
+            result = {"updated_fields": list(updates)}
+            conn.execute("INSERT INTO sheets_bridge_events(event_id,kind,result_json) VALUES(?,?,?)",
+                         (key,kind,json.dumps(result)))
             conn.commit()
         except Exception:
             conn.rollback()
