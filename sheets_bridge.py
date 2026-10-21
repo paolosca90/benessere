@@ -14,6 +14,63 @@ from benessere import db, maxes, nutrition, workouts, wods
 
 MAX_BYTES = 65536
 
+def apply_workout_revision(conn, key: str, data: dict) -> dict:
+    """Rettifica un allenamento IMPORTATO senza creare una seconda sessione."""
+    from benessere import workout_details as details
+    source=str(data.get("update_of") or "")
+    if not source or source == key:
+        raise ValueError("ID allenamento originale mancante")
+    original=conn.execute(
+        "SELECT kind,result_json FROM sheets_bridge_events WHERE event_id=?",(source,)
+    ).fetchone()
+    if not original or original["kind"]!="workout":
+        raise ValueError("Evento workout originale non trovato")
+    first=json.loads(original["result_json"])
+    workout_id=first.get("workout_id")
+    wod_id=first.get("wod_result_id")
+    if not isinstance(workout_id,int):
+        raise ValueError("Riferimento workout mancante")
+    previous=conn.execute("SELECT * FROM workouts WHERE id=?",(workout_id,)).fetchone()
+    if not previous or previous["source"]!="chatgpt_sheets":
+        raise ValueError("Allenamento originale non modificabile")
+    if data.get("date") != previous["date"]:
+        raise ValueError("La data originale non puo' cambiare")
+    start_time=details.start_time_string(data["start_time"])
+    duration=float(data.get("duration_min",previous["duration_min"]))
+    if not 1 <= duration <= 360:
+        raise ValueError("Durata sessione fuori intervallo")
+    notes=str(data.get("notes",""))
+    if not notes or len(notes)>1000:
+        raise ValueError("Note della rettifica non valide")
+    blocks=details.normalized_blocks(data["blocks"])
+    original_wod=conn.execute("SELECT * FROM wod_results WHERE id=?",(wod_id,)).fetchone() if wod_id else None
+    total=original_wod["score_value"]/60 if original_wod else None
+    warnings=details.timeline_warnings(blocks,total)
+    wod_notes=str(data.get("wod_notes",""))
+    if len(wod_notes)>1000:
+        raise ValueError("Note WOD troppo lunghe")
+    details.initialize(conn)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        again=conn.execute("SELECT result_json FROM sheets_bridge_events WHERE event_id=?",(key,)).fetchone()
+        if again:
+            conn.rollback()
+            return {"status":"duplicate","result":json.loads(again["result_json"])}
+        conn.execute("UPDATE workouts SET start_time=?,duration_min=?,notes=?,wod_result_id=? WHERE id=?",
+                     (start_time,duration,notes,wod_id,workout_id))
+        count=details.replace_blocks_in_transaction(conn,workout_id,blocks)
+        if wod_id and wod_notes:
+            conn.execute("UPDATE wod_results SET notes=? WHERE id=?",(wod_notes,wod_id))
+        result={"workout_id":workout_id,"wod_result_id":wod_id,
+                "blocks_updated":count,"timeline_warnings":warnings}
+        conn.execute("INSERT INTO sheets_bridge_events(event_id,kind,result_json) VALUES(?,?,?)",
+                     (key,"workout",json.dumps(result,ensure_ascii=False)))
+        conn.commit()
+        return {"status":"saved","result":result}
+    except Exception:
+        conn.rollback()
+        raise
+
 def apply_event(conn, key: str, kind: str, data: dict) -> dict:
     if not isinstance(key, str) or not 4 <= len(key) <= 128 or not all(c.isalnum() or c in '_-' for c in key):
         raise ValueError("ID non valido")
@@ -23,6 +80,8 @@ def apply_event(conn, key: str, kind: str, data: dict) -> dict:
     prior = conn.execute("SELECT result_json FROM sheets_bridge_events WHERE event_id=?", (key,)).fetchone()
     if prior:
         return {"status": "duplicate", "result": json.loads(prior["result_json"])}
+    if kind == "workout" and data.get("update_of"):
+        return apply_workout_revision(conn,key,data)
     if kind == "workout":
         day = date.fromisoformat(data["date"]).isoformat()
         duration = float(data["duration_min"])
