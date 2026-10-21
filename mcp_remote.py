@@ -16,7 +16,7 @@ from mcp.server.fastmcp import FastMCP
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from benessere import db, health_sync
+from benessere import db, health_sync, health_metrics
 import mcp_server as local
 
 mcp = FastMCP("Benessere - dati e diario personale")
@@ -82,6 +82,21 @@ def get_health_overview(days: int = 7) -> str:
                            "hrv": hrv, "heart_rate_by_utc_date": hr,
                            "health_connect_sessions_raw": events,
                            "sync_status": health_sync.status(c)}, ensure_ascii=False)
+    finally:
+        c.close()
+
+
+@mcp.tool()
+def get_health_trends(days: int = 30) -> str:
+    """Trend reali Health Connect / Zepp: battiti, sonno, passi, HRV, saturazione.
+    Include copertura, fonti e limiti. Nessuna diagnosi o dato stimato.
+    """
+    n = _days(days, 90)
+    c = db.connect()
+    try:
+        history = health_metrics.snapshot(c, date.today(), n)
+        history["observations"] = health_metrics.observations(history)
+        return json.dumps(history, ensure_ascii=False)
     finally:
         c.close()
 
