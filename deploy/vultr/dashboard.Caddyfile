@@ -1,0 +1,27 @@
+# Caddy site templates: dashboard password hash is inserted by deploy script.
+dashboard-benessere.45-77-66-215.nip.io {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+        Cache-Control "no-store"
+        -Server
+    }
+    basic_auth {
+        benessere __DASHBOARD_BCRYPT_HASH__
+    }
+    reverse_proxy benessere-dashboard:8501
+}
+
+mcp-benessere.45-77-66-215.nip.io {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+        Cache-Control "no-store"
+        -Server
+    }
+    reverse_proxy benessere-mcp:8000
+}

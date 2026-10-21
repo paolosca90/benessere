@@ -1,6 +1,6 @@
 # Benessere — VPS Vultr (installazione 21/10/2026)
 
-Questo documento registra il deployment del **solo backend Android** sulla VPS esistente. La dashboard Streamlit **non** è stata pubblicata: prima servono autenticazione dedicata, dimensionamento della RAM e migrazione controllata dei dati Mac.
+Questo documento registra il deployment sulla VPS esistente. Il backend Android e, dopo l'installazione dello stack web, la dashboard Streamlit e il server MCP condividono lo stesso database persistente. La dashboard usa HTTP Basic Auth su HTTPS; MCP usa un Bearer separato. La connessione nativa da ChatGPT è subordinata ai permessi del prodotto e al metodo di autenticazione supportato.
 
 ## Stato operativo
 
@@ -11,6 +11,18 @@ Questo documento registra il deployment del **solo backend Android** sulla VPS e
 - Reverse proxy TLS: container preesistente `youtube-creator-os-caddy`, file host `/opt/youtubecreatoros/app/Caddyfile`; un sito Benessere aggiunto in coda al file; snippet di riferimento in `deploy/vultr/benessere.Caddyfile`.
 - Backup del Caddyfile precedente: `/opt/youtubecreatoros/app/Caddyfile.backup-before-benessere`.
 - YouTubeCreatorOS continua a usare la propria configurazione e i propri container. Non cancellare i suoi dati.
+
+## Dashboard e MCP
+
+- Dashboard su `https://dashboard-benessere.45-77-66-215.nip.io`, utente `benessere`.
+- Password dashboard salvata **solo sulla VPS**, recuperabile con:
+  `ssh root@45.77.66.215 'cat /opt/benessere/private/dashboard_password.txt'`.
+- MCP remoto su `https://mcp-benessere.45-77-66-215.nip.io/mcp`.
+- Token MCP separato, recuperabile solo sulla VPS:
+  `ssh root@45.77.66.215 'cat /opt/benessere/private/mcp_token.txt'`.
+- **Non** incollare credenziali o foto sanitarie nella configurazione pubblica del sito o nel repo. Il server MCP richiede `Authorization: Bearer <token>` su ogni richiesta.
+- Dockerfile e Compose dello stack web sono in questa cartella. Lo stack è separato da CreatorOS e non espone porte host.
+- Lo stream HTTP MCP è disponibile per client compatibili. L'integrazione in ChatGPT richiede un'app/plugin autorizzato e autenticazione supportata; **non** è automaticamente collegata dall'esistenza dell'URL.
 
 ## Telefono Android
 
@@ -50,5 +62,5 @@ Attenzione: la configurazione del Caddyfile preesistente era montata su un vecch
 - Verificare il primo invio reale da Android a questa VPS.
 - Organizzare backup SQLite cifrati e ripristino verificato; non effettuare backup su repository pubblico.
 - Migrare, se richiesto, lo storico Mac usando copia consistente SQLite (backup API), TLS/SSH e senza sovrascrivere nuove sincronizzazioni.
-- Pubblicare eventualmente la dashboard dietro autenticazione dedicata; la VPS dispone di ~1 GB RAM e dovrebbe essere dimensionata prima di aggiungere Streamlit.
+- Monitorare l'impatto di Streamlit sulla VPS (~1 GB RAM): valutare upgrade a 2 GB se compaiono OOM/restart o rallentamenti.
 - Sostituire il sottodominio `nip.io` con un dominio proprio quando disponibile.

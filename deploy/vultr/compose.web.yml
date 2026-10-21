@@ -1,0 +1,52 @@
+# Deployment Benessere; separate from the CreatorOS Compose project.
+services:
+  benessere-dashboard:
+    image: benessere-web:20261021
+    container_name: benessere-dashboard
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 120
+    mem_limit: 300m
+    cpus: 0.5
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      HOME: /tmp
+      TZ: Europe/Rome
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - /opt/benessere/data:/app/data:rw
+    working_dir: /app
+    command: ["python","-m","streamlit","run","app.py","--server.headless=true","--server.address=0.0.0.0","--server.port=8501","--browser.gatherUsageStats=false","--server.maxUploadSize=10"]
+    networks: [existing_proxy]
+  benessere-mcp:
+    image: benessere-web:20261021
+    container_name: benessere-mcp
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 90
+    mem_limit: 180m
+    cpus: 0.5
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      HOME: /tmp
+      TZ: Europe/Rome
+      MCP_TOKEN_FILE: /run/secrets/mcp_token
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    volumes:
+      - /opt/benessere/data:/app/data:rw
+      - /opt/benessere/private/mcp_token.txt:/run/secrets/mcp_token:ro
+    working_dir: /app
+    command: ["python","-u","mcp_remote.py"]
+    networks: [existing_proxy]
+networks:
+  existing_proxy:
+    external: true
+    name: app_default
