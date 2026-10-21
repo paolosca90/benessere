@@ -13,6 +13,7 @@ from sync_server import SyncHTTPServer
 def conn(tmp_path):
     c = db.connect(tmp_path / "health.db")
     health_sync.initialize(c)
+    db.profile_set(c, "sleep_need_h", "8")
     yield c
     c.close()
 
