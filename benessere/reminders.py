@@ -29,7 +29,7 @@ def pending_meal_reminders(conn: sqlite3.Connection, now: datetime | None = None
                     "meal": meal,
                     "cutoff": cutoff.strftime("%H:%M"),
                     "message": f"{meal.capitalize()} non registrato (limite {cutoff.strftime('%H:%M')}). "
-                    f"Target oggi: {targets.target_kcal} kcal / {targets.protein_g} g proteine.",
+                    + (f"Target oggi: {targets.target_kcal} kcal / {targets.protein_g} g proteine." if targets else "Imposta il profilo per calcolare il target."),
                 }
             )
     return out
