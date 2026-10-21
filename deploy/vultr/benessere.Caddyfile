@@ -1,0 +1,13 @@
+
+# Benessere Health Connect API - independently routed from CreatorOS.
+benessere.45-77-66-215.nip.io {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+        Cache-Control "no-store"
+        -Server
+    }
+    reverse_proxy benessere-api:8766
+}
