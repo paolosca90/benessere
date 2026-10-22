@@ -47,6 +47,7 @@ import com.benessere.app.ble.HuamiBleClient
 import com.benessere.app.health.HealthConnectReader
 import com.benessere.app.health.HealthSyncClient
 import com.benessere.app.health.HealthSyncScheduler
+import com.benessere.app.health.LiveHeartUploader
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -159,8 +160,14 @@ fun BenessereApp() {
     val bleLog = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     val bleDevices = remember { androidx.compose.runtime.mutableStateMapOf<String, HuamiBleClient.DiscoveredDevice>() }
     var liveHr by remember { mutableStateOf<Int?>(null) }
+    val liveUploader = remember { LiveHeartUploader(context) }
+    var liveUploadEnabled by remember { mutableStateOf(liveUploader.enabled()) }
+    var liveUploadStatus by remember { mutableStateOf("Invio disattivato. I battiti sono visibili solo sul telefono.") }
     DisposableEffect(Unit) {
-        onDispose { runCatching { bleClient.disconnect() } }
+        onDispose {
+            runCatching { bleClient.disconnect() }
+            liveUploader.close()
+        }
     }
 
     Column(
@@ -337,7 +344,14 @@ fun BenessereApp() {
                     bleDevices.clear()
                     bleClient.listener = object : HuamiBleClient.Listener {
                         override fun onLog(line: String) { bleLog.add(0, line); if (bleLog.size > 50) bleLog.removeAt(bleLog.size - 1) }
-                        override fun onHeartRate(bpm: Int) { liveHr = bpm }
+                        override fun onHeartRate(bpm: Int) {
+                            liveHr = bpm
+                            val inForeground = (context as? ComponentActivity)?.lifecycle
+                                ?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true
+                            if (liveUploadEnabled && inForeground) {
+                                liveUploader.offer(bpm) { liveUploadStatus = it }
+                            }
+                        }
                         override fun onAuthResult(success: Boolean) {}
                         override fun onDeviceFound(device: HuamiBleClient.DiscoveredDevice) {
                             bleDevices[device.address] = device
@@ -357,7 +371,22 @@ fun BenessereApp() {
                     }) { Text("FC standard") }
                 }
             }
-            Text("Gli indirizzi BLE possono essere temporanei. «FC standard» verifica soltanto il profilo 180D, senza chiave; su Helio potrebbe non essere disponibile. Il trasporto Zepp FED0 è da integrare.")
+            Text("Gli indirizzi BLE possono essere temporanei. «FC standard» legge solo il profilo cardiaco 180D; il trasporto Zepp FED0 non è necessario per questa lettura.")
+            Row {
+                Checkbox(
+                    checked = liveUploadEnabled,
+                    onCheckedChange = { checked ->
+                        liveUploader.setEnabled(checked)
+                        liveUploadEnabled = checked
+                        liveUploadStatus = if (checked)
+                            "Invio attivo soltanto mentre questa schermata è aperta e la FC Bluetooth arriva. Richiede indirizzo HTTPS e token server configurati."
+                        else "Invio FC live disattivato."
+                    }
+                )
+                Text("Invia FC Bluetooth live alla dashboard (consenso esplicito)")
+            }
+            Text(liveUploadStatus, style = MaterialTheme.typography.bodySmall)
+            Text("Massimo 1 campione ogni 3 secondi. La dashboard lo mostra per pochi minuti, separato dai dati Health Connect.")
             liveHr?.let { Text("FC live: $it bpm", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary) }
             OutlinedTextField(
                 value = mac, onValueChange = { mac = it },

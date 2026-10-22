@@ -53,7 +53,7 @@ object HealthSyncClient {
         }
     }
 
-    private fun deviceId(context: Context): String {
+    fun deviceId(context: Context): String {
         val p = prefs(context)
         val existing = p.getString("device_id", null)
         if (!existing.isNullOrBlank()) return existing
