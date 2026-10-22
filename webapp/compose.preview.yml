@@ -2,6 +2,8 @@
 # NON registra nuovi domini e NON tocca l'attuale Caddy/Streamlit/CreatorOS.
 services:
   benessere-api-v2:
+    image: benessere-api-v2:preview
+    pull_policy: never
     build: {context: .., dockerfile: webapp/api/Dockerfile}
     restart: unless-stopped
     read_only: true
@@ -20,6 +22,8 @@ services:
     tmpfs: [/tmp:size=32m,mode=1777]
     networks: [preview_internal]
   benessere-pwa-preview:
+    image: benessere-pwa-preview:preview
+    pull_policy: never
     build: {context: ./frontend, dockerfile: Dockerfile}
     restart: unless-stopped
     read_only: true
