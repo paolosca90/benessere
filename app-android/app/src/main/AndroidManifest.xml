@@ -31,6 +31,7 @@
 
     <!-- Health Connect (lettura) -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
     <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
@@ -42,7 +43,7 @@
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
 
     <application
-        android:label="Benessere"
+        android:label="${benessereAppLabel}"
         android:supportsRtl="true"
         android:allowBackup="false"
         android:usesCleartextTraffic="true"
@@ -86,5 +87,12 @@
         <receiver
             android:name=".alarm.AlarmReceiver"
             android:exported="false" />
+        <receiver
+            android:name=".alarm.AlarmBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

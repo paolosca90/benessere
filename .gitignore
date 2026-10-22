@@ -19,6 +19,13 @@ app-android/local.properties
 **/__pycache__/
 .venv/
 
+# Frontend PWA (mai versionare build, moduli o segreti)
+webapp/frontend/node_modules/
+webapp/frontend/.next/
+webapp/frontend/.env*
+!webapp/frontend/.env.example
+webapp/frontend/*.tsbuildinfo
+
 # varia
 .video_agent/
 out/

@@ -1,13 +1,14 @@
 package com.benessere.app.health
 
 import android.content.Context
-import android.os.Build
 import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
+import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
 import androidx.health.connect.client.records.OxygenSaturationRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.SleepSessionRecord
@@ -30,8 +31,8 @@ class HealthConnectReader(context: Context) {
         val heartRateSamples: Int,
         val lastHeartRate: Int?,
         val lastNightSleepMinutes: Long?,
-        val exercisesToday: Int,
-        val stepsToday: Long,
+        val exercisesToday: Int?,
+        val stepsToday: Long?,
         val totalCaloriesToday: Double?,
         val spo2Last: Double?,
         val weightLastKg: Double?
@@ -41,6 +42,7 @@ class HealthConnectReader(context: Context) {
 
     val permissions = setOf(
         HealthPermission.getReadPermission(HeartRateRecord::class),
+        HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class),
         HealthPermission.getReadPermission(SleepSessionRecord::class),
         HealthPermission.getReadPermission(ExerciseSessionRecord::class),
         HealthPermission.getReadPermission(StepsRecord::class),
@@ -52,19 +54,30 @@ class HealthConnectReader(context: Context) {
 
     val permissionContract = PermissionController.createRequestPermissionResultContract()
 
+    suspend fun grantedPermissions(): Set<String> =
+        client.permissionController.getGrantedPermissions().intersect(permissions)
+
+    suspend fun hasAnyPermissions(): Boolean = grantedPermissions().isNotEmpty()
+
     suspend fun hasAllPermissions(): Boolean =
         client.permissionController.getGrantedPermissions().containsAll(permissions)
 
-    // La lettura in background non e' disponibile su ogni combinazione OS/provider.
-    // Compatibilità con la versione 1.1.0 del client SDK attualmente installata.
-    // La disponibilità effettiva viene verificata dal permesso concesso: se manca,
-    // niente JobScheduler e resta la sincronizzazione all'apertura.
+    suspend fun permissionSummary(): String {
+        val granted = grantedPermissions()
+        val missing = permissions.size - granted.size
+        return "${granted.size}/${permissions.size} categorie autorizzate" +
+            if (missing > 0) " · $missing mancanti (le altre vengono comunque sincronizzate)" else ""
+    }
+
+    // Feature detection ufficiale: Android API level da solo non basta.
     val backgroundAvailable: Boolean
-        get() = Build.VERSION.SDK_INT >= 35
+        get() = client.features.getFeatureStatus(
+            HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_IN_BACKGROUND
+        ) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
 
     suspend fun backgroundGranted(): Boolean = backgroundAvailable &&
         client.permissionController.getGrantedPermissions().contains(
-            "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
+            HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
         )
 
     private suspend inline fun <reified T : Record> allRecords(
@@ -88,7 +101,10 @@ class HealthConnectReader(context: Context) {
 
     suspend fun exportPayload(days: Int = 3): JSONObject {
         require(days in 1..7)
-        if (!hasAllPermissions()) throw SecurityException("Autorizza prima tutte le letture Health Connect")
+        val granted = grantedPermissions()
+        if (granted.isEmpty()) throw SecurityException("Nessuna lettura Health Connect autorizzata")
+        fun allowed(record: kotlin.reflect.KClass<out Record>): Boolean =
+            HealthPermission.getReadPermission(record) in granted
         val now = Instant.now()
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
@@ -96,36 +112,40 @@ class HealthConnectReader(context: Context) {
         val range = TimeRangeFilter.between(start, now)
         val result = JSONObject().put("schema", 1)
         val daily = JSONArray()
-        for (offset in days - 1 downTo 0) {
-            val day = today.minusDays(offset.toLong())
-            val from = day.atStartOfDay(zone).toInstant()
-            val end = minOf(day.plusDays(1).atStartOfDay(zone).toInstant(), now)
-            val agg = client.aggregate(
-                AggregateRequest(
-                    metrics = setOf(
-                        StepsRecord.COUNT_TOTAL,
-                        ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
-                        TotalCaloriesBurnedRecord.ENERGY_TOTAL
-                    ),
-                    timeRangeFilter = TimeRangeFilter.between(from, end)
+        val stepsGranted = allowed(StepsRecord::class)
+        val activeGranted = allowed(ActiveCaloriesBurnedRecord::class)
+        val totalGranted = allowed(TotalCaloriesBurnedRecord::class)
+        if (stepsGranted || activeGranted || totalGranted) {
+            for (offset in days - 1 downTo 0) {
+                val day = today.minusDays(offset.toLong())
+                val from = day.atStartOfDay(zone).toInstant()
+                val end = minOf(day.plusDays(1).atStartOfDay(zone).toInstant(), now)
+                val metrics = setOfNotNull(
+                    StepsRecord.COUNT_TOTAL.takeIf { stepsGranted },
+                    ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL.takeIf { activeGranted },
+                    TotalCaloriesBurnedRecord.ENERGY_TOTAL.takeIf { totalGranted }
                 )
-            )
-            daily.put(JSONObject().put("date", day.toString())
-                .put("steps", agg[StepsRecord.COUNT_TOTAL] ?: JSONObject.NULL)
-                .put("active_kcal", agg[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
-                    ?.inKilocalories ?: JSONObject.NULL)
-                .put("total_kcal", agg[TotalCaloriesBurnedRecord.ENERGY_TOTAL]
-                    ?.inKilocalories ?: JSONObject.NULL))
+                val agg = client.aggregate(AggregateRequest(
+                    metrics = metrics,
+                    timeRangeFilter = TimeRangeFilter.between(from, end)
+                ))
+                daily.put(JSONObject().put("date", day.toString())
+                    .put("steps", if (stepsGranted) agg[StepsRecord.COUNT_TOTAL] ?: JSONObject.NULL else JSONObject.NULL)
+                    .put("active_kcal", if (activeGranted) agg[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
+                        ?.inKilocalories ?: JSONObject.NULL else JSONObject.NULL)
+                    .put("total_kcal", if (totalGranted) agg[TotalCaloriesBurnedRecord.ENERGY_TOTAL]
+                        ?.inKilocalories ?: JSONObject.NULL else JSONObject.NULL))
+            }
         }
         val heart = JSONArray()
-        allRecords<HeartRateRecord>(range).forEach { record ->
+        (if (allowed(HeartRateRecord::class)) allRecords<HeartRateRecord>(range) else emptyList()).forEach { record ->
             record.samples.forEach { sample ->
                 heart.put(JSONObject().put("ts", sample.time.toString())
                     .put("bpm", sample.beatsPerMinute))
             }
         }
         val sessions = JSONArray()
-        allRecords<SleepSessionRecord>(range, 2000).forEach { s ->
+        (if (allowed(SleepSessionRecord::class)) allRecords<SleepSessionRecord>(range, 2000) else emptyList()).forEach { s ->
             val nightDate = s.endTime.atZone(zone).toLocalDate().toString()
             var deep = 0L
             var light = 0L
@@ -152,7 +172,7 @@ class HealthConnectReader(context: Context) {
                 .put("awake_min", if (s.stages.isEmpty()) JSONObject.NULL else awake)
             sessions.put(data)
         }
-        allRecords<ExerciseSessionRecord>(range, 2000).forEach { s ->
+        (if (allowed(ExerciseSessionRecord::class)) allRecords<ExerciseSessionRecord>(range, 2000) else emptyList()).forEach { s ->
             sessions.put(JSONObject().put("kind", "exercise")
                 .put("id", s.metadata.id.ifBlank { "${s.startTime}-${s.endTime}" })
                 .put("origin", s.metadata.dataOrigin.packageName)
@@ -161,17 +181,24 @@ class HealthConnectReader(context: Context) {
         }
         // I dati biometrici già accessibili sul telefono devono arrivare anche sul server.
         val oxygen = JSONArray()
-        allRecords<OxygenSaturationRecord>(range, 2000).forEach { s ->
+        (if (allowed(OxygenSaturationRecord::class)) allRecords<OxygenSaturationRecord>(range, 2000) else emptyList()).forEach { s ->
             oxygen.put(JSONObject().put("ts", s.time.toString())
                 .put("pct", s.percentage.value))
         }
         val weights = JSONArray()
-        allRecords<WeightRecord>(range, 2000).forEach { w ->
+        (if (allowed(WeightRecord::class)) allRecords<WeightRecord>(range, 2000) else emptyList()).forEach { w ->
             weights.put(JSONObject().put("date", w.time.atZone(zone).toLocalDate().toString())
                 .put("weight_kg", w.weight.inKilograms))
         }
+        // HRV RMSSD: incluso SOLO se Health Connect espone misure autorizzate.
+        val hrv = JSONArray()
+        (if (allowed(HeartRateVariabilityRmssdRecord::class))
+            allRecords<HeartRateVariabilityRmssdRecord>(range, 2000) else emptyList()).forEach { h ->
+            hrv.put(JSONObject().put("night_date", h.time.atZone(zone).toLocalDate().toString())
+                .put("ts", h.time.toString()).put("rmssd_ms", h.heartRateVariabilityMillis))
+        }
         return result.put("days", daily).put("heart_rates", heart).put("sessions", sessions)
-            .put("oxygen_saturation", oxygen).put("weights", weights)
+            .put("oxygen_saturation", oxygen).put("weights", weights).put("hrv_rmssd", hrv)
     }
 
     suspend fun snapshot(): Snapshot {
@@ -179,28 +206,38 @@ class HealthConnectReader(context: Context) {
         val zone = ZoneId.systemDefault()
         val startOfDay = LocalDate.now(zone).atStartOfDay(zone).toInstant()
         val today = TimeRangeFilter.between(startOfDay, now)
-        val hr = allRecords<HeartRateRecord>(today)
+        val granted = grantedPermissions()
+        if (granted.isEmpty()) throw SecurityException("Permessi Health Connect assenti")
+        fun allowed(record: kotlin.reflect.KClass<out Record>): Boolean =
+            HealthPermission.getReadPermission(record) in granted
+        val hr = if (allowed(HeartRateRecord::class)) allRecords<HeartRateRecord>(today) else emptyList()
         val lastBpm = hr.flatMap { it.samples }.maxByOrNull { it.time }?.beatsPerMinute
-        val sleep = allRecords<SleepSessionRecord>(
+        val sleep = if (allowed(SleepSessionRecord::class)) allRecords<SleepSessionRecord>(
             TimeRangeFilter.between(now.minus(Duration.ofDays(2)), now), 2000
-        )
+        ) else emptyList()
         val lastSleep = sleep.maxByOrNull { it.endTime }
-        val exercises = allRecords<ExerciseSessionRecord>(today, 2000)
-        val aggregates = client.aggregate(AggregateRequest(
-            metrics = setOf(StepsRecord.COUNT_TOTAL, TotalCaloriesBurnedRecord.ENERGY_TOTAL),
-            timeRangeFilter = today
-        ))
-        val spo2 = allRecords<OxygenSaturationRecord>(today, 2000)
-        val weight = allRecords<WeightRecord>(
-            TimeRangeFilter.between(now.minus(Duration.ofDays(30)), now), 2000
+        val exercises = if (allowed(ExerciseSessionRecord::class)) allRecords<ExerciseSessionRecord>(today, 2000) else emptyList()
+        val stepsAllowed = allowed(StepsRecord::class)
+        val totalAllowed = allowed(TotalCaloriesBurnedRecord::class)
+        val metricSet = setOfNotNull(
+            StepsRecord.COUNT_TOTAL.takeIf { stepsAllowed },
+            TotalCaloriesBurnedRecord.ENERGY_TOTAL.takeIf { totalAllowed }
         )
+        val aggregates = if (metricSet.isNotEmpty()) client.aggregate(AggregateRequest(
+            metrics = metricSet,
+            timeRangeFilter = today
+        )) else null
+        val spo2 = if (allowed(OxygenSaturationRecord::class)) allRecords<OxygenSaturationRecord>(today, 2000) else emptyList()
+        val weight = if (allowed(WeightRecord::class)) allRecords<WeightRecord>(
+            TimeRangeFilter.between(now.minus(Duration.ofDays(30)), now), 2000
+        ) else emptyList()
         return Snapshot(
             heartRateSamples = hr.sumOf { it.samples.size },
             lastHeartRate = lastBpm?.toInt(),
             lastNightSleepMinutes = lastSleep?.let { Duration.between(it.startTime, it.endTime).toMinutes() },
-            exercisesToday = exercises.size,
-            stepsToday = aggregates[StepsRecord.COUNT_TOTAL] ?: 0L,
-            totalCaloriesToday = aggregates[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories,
+            exercisesToday = if (allowed(ExerciseSessionRecord::class)) exercises.size else null,
+            stepsToday = if (stepsAllowed) aggregates?.get(StepsRecord.COUNT_TOTAL) else null,
+            totalCaloriesToday = if (totalAllowed) aggregates?.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.inKilocalories else null,
             spo2Last = spo2.maxByOrNull { it.time }?.percentage?.value,
             weightLastKg = weight.maxByOrNull { it.time }?.weight?.inKilograms
         )

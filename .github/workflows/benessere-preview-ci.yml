@@ -1,0 +1,146 @@
+name: Benessere PWA + Android preview
+on:
+  pull_request:
+    paths:
+      - "webapp/**"
+      - "benessere/**"
+      - "sync_server.py"
+      - "app.py"
+      - "app-android/**"
+      - "tests/**"
+      - ".github/workflows/benessere-preview-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: Install test dependencies
+        run: |
+          pip install -r requirements.txt -r webapp/api/requirements.txt httpx==0.28.1
+      - name: Unit / API tests (no real health data)
+        run: python -m pytest tests -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webapp/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webapp/frontend/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+
+  android:
+    # Enable only after the user provisions the ORIGINAL local signing key
+    # as the encrypted secret. Without it, never publish incompatible upgrades.
+    if: vars.BENESSERE_SIGNING_READY == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: "temurin", java-version: "17"}
+      - name: Configure preinstalled Android SDK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" --install "platforms;android-34" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: "8.13"}
+      - name: Restore original Android signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.BENESSERE_ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Original signing key missing. Refusing incompatible APK."
+            exit 1
+          fi
+          install -d -m 700 "$HOME/.android"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          keytool -list -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey >/dev/null
+          # Reference SHA256: independently observed in APKs 0.1.0/0.2.0/0.2.1
+          # and the old Windows signing keystore.
+          EXPECTED_FINGERPRINT="F6C7A9C56DDE973E28C59AD6C5D6B6CD62374DC7F69A885432C79555B29DB796"
+          ACTUAL_FINGERPRINT="$(keytool -exportcert \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey | sha256sum | awk '{print toupper($1)}')"
+          if [ "$ACTUAL_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "::error::Keystore does NOT match the original signing certificate."
+            echo "Expected $EXPECTED_FINGERPRINT; received $ACTUAL_FINGERPRINT"
+            exit 1
+          fi
+          echo "Original signing certificate SHA-256 matches"
+          echo "BENESSERE_SIGNING_KEYSTORE_PATH=$HOME/.android/debug.keystore" >> "$GITHUB_ENV"
+      - name: Assemble APK with original signing identity
+        run: gradle --no-daemon -p app-android :app:assembleDebug
+      - name: Verify built APK signing certificate before upload
+        run: |
+          APK="app-android/app/build/outputs/apk/debug/app-debug.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" > /tmp/benessere-apk-cert.txt
+          EXPECTED="f6c7a9c56dde973e28c59ad6c5d6b6cd62374dc7f69a885432c79555b29db796"
+          if ! grep -qiF "Signer #1 certificate SHA-256 digest: $EXPECTED" /tmp/benessere-apk-cert.txt; then
+            echo "::error::APK signed with a different certificate; refusing to publish."
+            exit 1
+          fi
+          echo "Final APK certificate verified"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benessere-v0.2.5-compatible
+          path: app-android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  android-canary:
+    # Separate package name: does NOT replace the user's existing app or prefs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: "temurin", java-version: "17"}
+      - name: Configure Android SDK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" --install "platforms;android-34" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: "8.13"}
+      - name: Assemble isolated Benessere TEST APK
+        run: gradle --no-daemon -p app-android :app:assembleDebug -PbenessereCanary
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benessere-v0.2.5-TEST-installabile
+          path: app-android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API and PWA images outside VPS
+        run: |
+          SOURCE_REVISION="${{ github.event.pull_request.head.sha || github.sha }}"
+          docker build --build-arg SOURCE_REVISION="$SOURCE_REVISION" -t benessere-api-v2:preview -f webapp/api/Dockerfile .
+          docker build --build-arg SOURCE_REVISION="$SOURCE_REVISION" -t benessere-pwa-preview:preview -f webapp/frontend/Dockerfile webapp/frontend
+          docker save benessere-api-v2:preview benessere-pwa-preview:preview | gzip -1 > /tmp/benessere-preview-images.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benessere-preview-images
+          path: /tmp/benessere-preview-images.tar.gz
+          if-no-files-found: error
+          retention-days: 3

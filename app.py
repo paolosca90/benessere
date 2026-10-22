@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import streamlit as st
 
-from benessere import db as store
+from benessere import alarm_settings, db as store
 from benessere import health_metrics, health_sync, housekeeping, ingest, maxes, nutrition, nutrition_schedule, progress_photos, readiness, reminders, seed_wods, workout_details, workouts, wods
 from benessere import ui_theme as ui
 
@@ -25,7 +25,7 @@ TYPE_LABELS = {
 }
 MEAL_LABELS = {"breakfast": "Colazione", "lunch": "Pranzo", "dinner": "Cena", "snack": "Spuntino"}
 SCORES = {"time": "Tempo", "amrap": "AMRAP", "load": "Carico", "reps": "Ripetizioni"}
-NAV = ("Panoramica", "Salute", "Allenamenti", "WOD", "Benchmark", "Massimali", "Foto progressi", "Alimentazione", "Impostazioni")
+NAV = ("Panoramica", "Salute", "Allenamenti", "WOD", "Benchmark", "Massimali", "Foto progressi", "Alimentazione", "Sveglia", "Impostazioni")
 
 @st.cache_resource
 def get_conn(database_file: str):
@@ -623,6 +623,43 @@ def food_page():
     with st.expander("Registra un pasto",expanded=False):
         quick_meal(s)
 
+def alarm_page():
+    ui.hero("Sveglia e Helio Strap", "Configura dal web e applica sul telefono Android.", kicker="SONNO / SVEGLIA")
+    config=alarm_settings.read(conn)
+    options={"not_configured":"Non configurata","pending_phone":"In attesa del telefono",
+             "confirmed":"Applicata sul telefono","failed":"Errore Android"}
+    a,b=st.columns(2)
+    a.metric("Sincronizzazione",options.get(config["delivery"],"Sconosciuta"))
+    b.metric("Sveglia Helio Strap","Tramite Zepp")
+    ack=config.get("device_ack")
+    if ack and not ack["installed"] and config["delivery"]=="failed":
+        st.error("Errore Android: "+str(ack.get("error") or "non specificato"))
+    if config["delivery"]=="confirmed":
+        st.success("Telefono confermato: "+str(ack["received_at"]))
+    st.info("La modifica web NON programma direttamente l'Helio Strap. Apri Benessere sul telefono e usa 'Applica sveglia dalla web app'.")
+    from datetime import time as local_time
+    hours,minutes=map(int,config["deadline"].split(":"))
+    days=("Lun","Mar","Mer","Gio","Ven","Sab","Dom")
+    with st.form("alarm_settings_form"):
+        enabled=st.checkbox("Sveglia telefonica attiva",value=config["enabled"])
+        wake=st.time_input("Orario limite del risveglio",value=local_time(hours,minutes),step=300)
+        selected=st.multiselect("Giorni della settimana",list(range(1,8)),
+                                default=config["weekdays"],format_func=lambda d:days[d-1])
+        window=st.selectbox("Finestra di risveglio (uso futuro, non attiva)",
+                            [15,30,45,60],index=[15,30,45,60].index(config["window_minutes"]))
+        st.caption("Modalità attuale: allarme fisso sul telefono. Le fasi del sonno in tempo reale e la vibrazione sullo Strap non sono ancora supportate.")
+        if st.form_submit_button("Salva impostazioni",type="primary"):
+            try:
+                updated=alarm_settings.save(conn,{"enabled":enabled,"deadline":wake.strftime("%H:%M"),
+                    "weekdays":selected,"window_minutes":window,"mode":"fixed"})
+                st.success("Configurazione salvata (rev "+str(updated["revision"])+"). In attesa dell'app Android.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+    with st.expander("Sicurezza e limiti"):
+        st.markdown("Per la vibrazione sullo strap configura **Zepp → Dispositivo → Helio Strap → Sveglia**. "
+                    "Nel frattempo mantieni una sveglia di riserva. Il browser non può garantire una sveglia a schermo spento.")
+
 def settings_page():
     ui.hero("Profilo personale", "Misurazioni, obiettivi e sincronizzazioni. Tutti i valori vengono dai tuoi dati.",kicker="BENESSERE / PROFILO")
     height_saved=store.profile_get_float(conn,"height_cm")
@@ -701,4 +738,5 @@ elif page=="Benchmark":benchmark_page()
 elif page=="Massimali":maxes_page()
 elif page=="Foto progressi":photos_page()
 elif page=="Alimentazione":food_page()
+elif page=="Sveglia":alarm_page()
 else:settings_page()
