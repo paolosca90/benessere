@@ -1,0 +1,41 @@
+# Preview isolata. Accessibile solo dal loopback della VPS via tunnel SSH.
+# NON registra nuovi domini e NON tocca l'attuale Caddy/Streamlit/CreatorOS.
+services:
+  benessere-api-v2:
+    build: {context: .., dockerfile: webapp/api/Dockerfile}
+    restart: unless-stopped
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 220m
+    cpus: 0.5
+    env_file: /opt/benessere/private/webapp.preview.env
+    environment:
+      BENESSERE_DB: /app/data/benessere.db
+      HOME: /tmp
+      TZ: Europe/Rome
+    volumes:
+      - /opt/benessere/preview-data:/app/data:rw
+    tmpfs: [/tmp:size=32m,mode=1777]
+    networks: [preview_internal]
+  benessere-pwa-preview:
+    build: {context: ./frontend, dockerfile: Dockerfile}
+    restart: unless-stopped
+    read_only: true
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 320m
+    cpus: 1.0
+    env_file: /opt/benessere/private/webapp.preview.env
+    environment:
+      BENESSERE_API_INTERNAL_URL: http://benessere-api-v2:8780
+      HOME: /tmp
+    tmpfs: [/tmp:size=64m,mode=1777]
+    ports: ["127.0.0.1:3001:3000"]
+    networks: [preview_internal]
+    depends_on: [benessere-api-v2]
+networks:
+  preview_internal:
+    internal: true

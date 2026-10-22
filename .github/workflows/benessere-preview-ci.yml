@@ -1,0 +1,60 @@
+name: Benessere PWA + Android preview
+on:
+  pull_request:
+    paths:
+      - "webapp/**"
+      - "benessere/**"
+      - "sync_server.py"
+      - "app.py"
+      - "app-android/**"
+      - "tests/**"
+      - ".github/workflows/benessere-preview-ci.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: Install test dependencies
+        run: |
+          pip install -r requirements.txt -r webapp/api/requirements.txt httpx==0.28.1
+      - name: Unit / API tests (no real health data)
+        run: python -m pytest tests -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webapp/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webapp/frontend/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: "temurin", java-version: "17"}
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: "8.11.1"}
+      - name: Assemble debug APK
+        run: gradle --no-daemon -p app-android :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benessere-v0.2.2-debug
+          path: app-android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

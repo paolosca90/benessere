@@ -355,7 +355,23 @@ fun BenessereApp() {
         }
 
         // ---- Scheda sveglia ----
-        SectionCard("Sveglia intelligente (L1)") {
+        SectionCard("Sveglia sincronizzata dal web") {
+            var alarmStatus by remember { mutableStateOf(SmartAlarmScheduler.configuredStatus(context)) }
+            Text("La web app salva l'orario e i giorni; il telefono deve scaricare e applicare le impostazioni. L'Helio Strap non viene comandato da Benessere.")
+            Text(alarmStatus, color=MaterialTheme.colorScheme.secondary)
+            Button(onClick = {
+                scope.launch {
+                    alarmStatus = "Sincronizzazione sveglia in corso…"
+                    alarmStatus = try {
+                        HealthSyncClient.syncAlarm(context)
+                    } catch(e: Exception) {
+                        "Errore: " + (e.message ?: e.javaClass.simpleName)
+                    }
+                }
+            }) { Text("Applica sveglia dalla web app") }
+        }
+
+        SectionCard("Sveglia sul telefono (manuale)") {
             var startField by remember { mutableStateOf("06:30") }
             var endField by remember { mutableStateOf("07:00") }
             var stepField by remember { mutableStateOf("10") }
@@ -376,7 +392,7 @@ fun BenessereApp() {
                 Button(onClick = { SmartAlarmScheduler.cancelAll(context) }) { Text("Annulla") }
             }
             Text(
-                "L1 = sveglie multiple nella finestra prevista. L2 (FC live nella finestra) arriva col modulo BLE.",
+                "L1: il telefono programma solo la sveglia all’orario massimo. La finestra non determina ancora una fase di sonno leggera. La vibrazione dell’Helio Strap va configurata in Zepp.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
