@@ -170,8 +170,49 @@ done
 [ "$code" = 401 ] || fail "Ricevitore live non disponibile: HTTP $code (previsto 401 senza token)."
 curl --fail --silent --show-error --max-time 10 \
   https://benessere.45-77-66-215.nip.io/health >/dev/null
-docker exec benessere-dashboard node -e \
-  'fetch("http://127.0.0.1:8501/api/live-heart-rate",{cache:"no-store"}).then(async r=>{if(!r.ok)throw new Error("HTTP "+r.status);const v=await r.json();if(v.status!=="offline"&&v.status!=="live")throw Error("Invalid payload");console.log("PWA/live-heart-rate:",v.status)}).catch(e=>{console.error(e.message);process.exit(1)})'
+# Next.js may need tens of seconds to start after container recreation.
+# The old one-shot test reverted an otherwise healthy Android live receiver.
+report "Attesa effettivo avvio Next.js e della API interna (max 90 secondi)"
+pwa_ok=0
+last_probe="non eseguita"
+for attempt in $(seq 1 45); do
+  if last_probe=$(docker exec benessere-dashboard node -e '
+    const controller=new AbortController();
+    const guard=setTimeout(()=>controller.abort(),3500);
+    fetch("http://127.0.0.1:8501/api/live-heart-rate",{
+      cache:"no-store",signal:controller.signal
+    }).then(async response=>{
+      if(!response.ok)throw Error("HTTP "+response.status);
+      const data=await response.json();
+      if(data.status!=="offline"&&data.status!=="live"){
+        throw Error("Risposta FC live non valida");
+      }
+      console.log("PWA/live-heart-rate:",data.status);
+    }).catch(error=>{
+      console.error("Verifica Next.js:",error.message);
+      process.exitCode=1;
+    }).finally(()=>clearTimeout(guard));
+  ' 2>&1); then
+    printf '%s\n' "$last_probe"
+    pwa_ok=1
+    break
+  fi
+  if (( attempt % 10 == 0 )); then
+    report "Next.js non ancora pronta (tentativo $attempt/45)"
+  fi
+  sleep 2
+done
+if [ "$pwa_ok" != 1 ]; then
+  printf 'Ultimo esito Next.js: %.500s\n' "$last_probe"
+  fail "La dashboard non espone ancora FC live dopo 90 secondi."
+fi
+# Existing dashboard summary must still be accessible without test writes.
+docker exec benessere-dashboard node -e '
+  fetch("http://127.0.0.1:8501/api/summary").then(r=>{
+    if(!r.ok)throw Error("Riepilogo: HTTP "+r.status);
+    console.log("PWA/summary: OK");
+  }).catch(e=>{console.error(e.message);process.exitCode=1;});
+'
 
 ARMED=0
 trap - EXIT
