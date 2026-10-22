@@ -85,6 +85,7 @@ jobs:
             exit 1
           fi
           echo "Original signing certificate SHA-256 matches"
+          echo "BENESSERE_SIGNING_KEYSTORE_PATH=$HOME/.android/debug.keystore" >> "$GITHUB_ENV"
       - name: Assemble APK with original signing identity
         run: gradle --no-daemon -p app-android :app:assembleDebug
       - name: Verify built APK signing certificate before upload

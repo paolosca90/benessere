@@ -21,6 +21,21 @@ android {
         versionName = "0.2.5"
     }
 
+    // L'APK di aggiornamento deve usare la firma dell'app già installata.
+    // GitHub Actions fornisce il percorso della keystore originale come
+    // variabile d'ambiente, senza committare o esporre la chiave privata.
+    signingConfigs {
+        getByName("debug") {
+            System.getenv("BENESSERE_SIGNING_KEYSTORE_PATH")
+                ?.takeIf { it.isNotBlank() }
+                ?.let { path ->
+                    storeFile = file(path)
+                    storePassword = "android"
+                    keyAlias = "androiddebugkey"
+                    keyPassword = "android"
+                }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
