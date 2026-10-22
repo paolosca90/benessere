@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Invio FC Bluetooth standard solo su esplicito consenso, solo mentre la
- * schermata Android è in primo piano e la connessione GATT è attiva.
+ * ricevitore BLE autorizzato è attivo nel foreground service Android.
  *
  * Non copia i campioni in Health Connect e non invia MAC/pairing key.
  * Campioni reali, con timestamp di ricezione BLE e cadenza max 1/3s.
@@ -74,7 +74,8 @@ class LiveHeartUploader(private val context: Context) {
                     conn.disconnect()
                 }
             } catch (e: Exception) {
-                earliestNextMs.set(SystemClock.elapsedRealtime() + 30_000L)
+                // La dashboard scade dopo 15s: non imporre 30s di buio per un errore di rete.
+                earliestNextMs.set(SystemClock.elapsedRealtime() + 5_000L)
                 main.post { update("Invio FC live non riuscito: ${e.message ?: "errore di rete"}") }
             } finally {
                 busy.set(false)
