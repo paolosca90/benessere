@@ -17,8 +17,8 @@ android {
             if (project.hasProperty("benessereCanary")) "Benessere TEST" else "Benessere"
         minSdk = 28
         targetSdk = 34
-        versionCode = 9
-        versionName = "0.2.5"
+        versionCode = 10
+        versionName = "0.2.6"
     }
 
     // L'APK di aggiornamento deve usare la firma dell'app già installata.
