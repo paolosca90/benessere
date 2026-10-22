@@ -91,6 +91,9 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
     event_list = payload.get("sessions", [])
     oxygen_list = payload.get("oxygen_saturation", [])
     weight_list = payload.get("weights", [])
+    hrv_list = payload.get("hrv_rmssd", [])
+    if not isinstance(hrv_list, list) or len(hrv_list) > 2000:
+        raise ValueError("troppi campioni HRV")
     if not isinstance(oxygen_list, list) or len(oxygen_list) > 5000:
         raise ValueError("troppi campioni SpO2")
     if not isinstance(weight_list, list) or len(weight_list) > 1000:
@@ -101,12 +104,23 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
         raise ValueError("troppi campioni FC")
     if not isinstance(event_list, list) or len(event_list) > MAX_EVENTS:
         raise ValueError("troppe sessioni")
-    if not day_list and not hr_list and not event_list and not oxygen_list and not weight_list:
+    if not day_list and not hr_list and not event_list and not oxygen_list and not weight_list and not hrv_list:
         raise ValueError("payload vuoto")
     updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     # Validazione completa PRIMA di scrivere. Su errore, rollback di tutto il batch.
     days, heart_rates, sessions, oxygen_samples, weights = [], [], [], [], []
+    hrv_latest_by_day = {}
+    for measurement in hrv_list:
+        if not isinstance(measurement, dict):
+            raise ValueError("campione HRV non valido")
+        day = _date(measurement.get("night_date"))
+        time = _iso(measurement.get("ts"))
+        rmssd = _value(measurement.get("rmssd_ms"), 200)
+        if rmssd is None or rmssd < 1:
+            raise ValueError("HRV RMSSD fuori intervallo")
+        if day not in hrv_latest_by_day or time > hrv_latest_by_day[day][0]:
+            hrv_latest_by_day[day] = (time, rmssd)
     for measurement in oxygen_list:
         if not isinstance(measurement,dict):
             raise ValueError("campione saturazione non valido")
@@ -160,6 +174,16 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
         for ts, pct in oxygen_samples:
             conn.execute("INSERT OR IGNORE INTO spo2_samples(ts,pct,source) VALUES(?, ?, 'health_connect')",
                          (ts,pct))
+        # Se presenti più record RMSSD nello stesso giorno, usiamo il più recente;
+        # non stimiamo HRV dai battiti e non cancelliamo eventuali valori Zepp diretti.
+        for day, (_, rmssd) in hrv_latest_by_day.items():
+            conn.execute("""
+                INSERT INTO hrv_daily(night_date,rmssd_ms,source)
+                VALUES(?,?,'health_connect')
+                ON CONFLICT(night_date) DO UPDATE SET
+                  rmssd_ms=excluded.rmssd_ms,source=excluded.source
+                WHERE hrv_daily.source='health_connect'
+            """, (day,rmssd))
         for date_s, weight in weights:
             conn.execute("""INSERT INTO days(date,weight_kg,source) VALUES(?, ?, 'health_connect')
                 ON CONFLICT(date) DO UPDATE SET weight_kg=excluded.weight_kg""",(date_s,weight))
@@ -243,7 +267,8 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
         raise
     return {"status": "ok", "new_hr_samples": new_hr, "received_days": len(days),
             "received_sessions": len(sessions), "received_spo2": len(oxygen_samples),
-            "received_weights": len(weights), "synced_at": updated_at}
+            "received_weights": len(weights), "received_hrv": len(hrv_latest_by_day),
+            "synced_at": updated_at}
 
 
 def status(conn: sqlite3.Connection) -> dict:

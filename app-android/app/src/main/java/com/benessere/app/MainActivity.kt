@@ -82,8 +82,8 @@ fun BenessereApp() {
     val scroll = rememberScrollState()
 
     // ---- permessi runtime ----
-    val btPermissions = mutableListOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-    if (Build.VERSION.SDK_INT >= 33) btPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
+    // Le notifiche (necessarie per la sveglia) sono indipendenti dalla scansione BLE.
+    val btPermissions = listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
     var permissionsGranted by remember {
         mutableStateOf(btPermissions.all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -104,13 +104,13 @@ fun BenessereApp() {
     suspend fun refreshHealthConnect() {
         val r = reader ?: return
         try {
-            hcGranted = r.hasAllPermissions()
+            hcGranted = r.hasAnyPermissions()
             if (hcGranted) {
                 hcSnapshot = r.snapshot()
-                hcMessage = ""
+                hcMessage = r.permissionSummary()
             } else {
                 hcSnapshot = null
-                hcMessage = "Permessi Health Connect mancanti o incompleti: premi Permessi e consenti tutte le letture richieste."
+                hcMessage = "Nessun permesso Health Connect concesso. Autorizza almeno le categorie che desideri sincronizzare."
             }
         } catch (e: Exception) {
             hcSnapshot = null
@@ -133,7 +133,16 @@ fun BenessereApp() {
     val hcContract = remember(reader) { reader?.permissionContract }
     val bgLauncher = if (hcContract != null) {
         rememberLauncherForActivityResult(hcContract) { _ ->
-            scope.launch { refreshHealthConnect() }
+            scope.launch {
+                refreshHealthConnect()
+                try {
+                    val enabled = HealthSyncClient.autoEnabled(context) &&
+                        (reader?.backgroundGranted() == true)
+                    HealthSyncScheduler.configure(context, enabled)
+                } catch (e: Exception) {
+                    hcMessage = "Programmazione oraria: ${e.message ?: "non disponibile"}"
+                }
+            }
         }
     } else null
     val hcLauncher: androidx.activity.compose.ManagedActivityResultLauncher<Set<String>, Set<String>>? =
@@ -148,6 +157,7 @@ fun BenessereApp() {
     // ---- BLE ----
     val bleClient = remember { HuamiBleClient(context) }
     val bleLog = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val bleDevices = remember { androidx.compose.runtime.mutableStateMapOf<String, HuamiBleClient.DiscoveredDevice>() }
     var liveHr by remember { mutableStateOf<Int?>(null) }
     DisposableEffect(Unit) {
         onDispose { runCatching { bleClient.disconnect() } }
@@ -165,7 +175,7 @@ fun BenessereApp() {
 
         if (!permissionsGranted) {
             Button(onClick = { permissionLauncher.launch(btPermissions.toTypedArray()) }) {
-                Text("Concedi permessi (Bluetooth + notifiche)")
+                Text("Concedi permessi Bluetooth")
             }
         }
 
@@ -179,7 +189,7 @@ fun BenessereApp() {
                         scope.launch {
                             try {
                                 if (reader.hasAllPermissions()) {
-                                    hcMessage = "Permessi già concessi. Usa Aggiorna per leggere i dati oppure Gestisci Health Connect per modificarli."
+                                    hcMessage = "Permessi già concessi per tutte le categorie."
                                 } else {
                                     hcMessage = "Richiesta autorizzazioni Health Connect in corso…"
                                     if (hcLauncher == null) {
@@ -212,8 +222,8 @@ fun BenessereApp() {
                     StatLine("Campioni FC oggi", s.heartRateSamples.toString())
                     StatLine("Ultima FC", s.lastHeartRate?.let { "$it bpm" } ?: "—")
                     StatLine("Sonno ultima notte", s.lastNightSleepMinutes?.let { "${it / 60}h ${it % 60}m" } ?: "—")
-                    StatLine("Allenamenti oggi", s.exercisesToday.toString())
-                    StatLine("Passi oggi", s.stepsToday.toString())
+                    StatLine("Allenamenti oggi", s.exercisesToday?.toString() ?: "— (permesso mancante)")
+                    StatLine("Passi oggi", s.stepsToday?.toString() ?: "— (permesso mancante)")
                     StatLine("Calorie totali oggi", s.totalCaloriesToday?.let { "%.0f kcal".format(it) } ?: "—")
                     StatLine("SpO2 ultimo", s.spo2Last?.let { "%.0f%%".format(it) } ?: "—")
                     StatLine("Peso ultimo", s.weightLastKg?.let { "%.1f kg".format(it) } ?: "—")
@@ -257,7 +267,7 @@ fun BenessereApp() {
                 lifecycle?.addObserver(observer)
                 onDispose { lifecycle?.removeObserver(observer) }
             }
-            Text("Server sul PC o VPS. Nessuna trasmissione finché non configuri indirizzo e token.")
+            Text("Server sul PC o VPS. Nessuna trasmissione finché non configuri indirizzo e token. Permessi parziali: vengono sincronizzate solo le misure autorizzate.")
             OutlinedTextField(
                 value = backendUrl, onValueChange = { backendUrl = it },
                 label = { Text("URL backend (es. http://192.168.1.100:8766)") },
@@ -323,15 +333,31 @@ fun BenessereApp() {
             var key by remember { mutableStateOf("") }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
+                    bleLog.clear()
+                    bleDevices.clear()
                     bleClient.listener = object : HuamiBleClient.Listener {
                         override fun onLog(line: String) { bleLog.add(0, line); if (bleLog.size > 50) bleLog.removeAt(bleLog.size - 1) }
                         override fun onHeartRate(bpm: Int) { liveHr = bpm }
                         override fun onAuthResult(success: Boolean) {}
+                        override fun onDeviceFound(device: HuamiBleClient.DiscoveredDevice) {
+                            bleDevices[device.address] = device
+                        }
                     }
                     if (permissionsGranted) bleClient.startScan() else permissionLauncher.launch(btPermissions.toTypedArray())
                 }) { Text("Scansiona") }
                 Button(onClick = { bleClient.disconnect() }) { Text("Disconnetti") }
             }
+            Text("Dispositivi unici rilevati: ${bleDevices.size}. Lo stesso indirizzo non viene più mostrato a ogni segnale BLE.")
+            bleDevices.values.sortedByDescending { it.rssi }.forEach { device ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${device.name} · ${device.address} · ${device.rssi} dBm",
+                        modifier = Modifier.weight(1f))
+                    Button(enabled = permissionsGranted, onClick = {
+                        bleClient.connectStandardHeartRate(device.address)
+                    }) { Text("FC standard") }
+                }
+            }
+            Text("Gli indirizzi BLE possono essere temporanei. «FC standard» verifica soltanto il profilo 180D, senza chiave; su Helio potrebbe non essere disponibile. Il trasporto Zepp FED0 è da integrare.")
             liveHr?.let { Text("FC live: $it bpm", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary) }
             OutlinedTextField(
                 value = mac, onValueChange = { mac = it },
@@ -343,10 +369,11 @@ fun BenessereApp() {
                 label = { Text("Chiave di pairing (32 cifre hex — docs/06)") },
                 modifier = Modifier.fillMaxWidth(), singleLine = true
             )
+            Text("Connessione Huami legacy (non Helio Zepp OS), sperimentale: evita di inserire chiavi Zepp se non indispensabile.")
             Button(
                 onClick = { bleClient.connect(mac.trim(), key.trim()) },
                 enabled = permissionsGranted && mac.isNotBlank() && key.isNotBlank()
-            ) { Text("Connetti e autentica") }
+            ) { Text("Connetti legacy (sperimentale)") }
             Column {
                 bleLog.take(12).forEach { line ->
                     Text("• $line", style = MaterialTheme.typography.bodySmall)

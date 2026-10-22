@@ -55,6 +55,39 @@ def test_idempotent_samples_sessions_and_no_double_workouts(conn):
     assert health_sync.status(conn)["stored_sessions"] == 3
 
 
+def test_hrv_rmssd_is_imported_without_inventing_values(conn):
+    packet = sample_data()
+    yesterday = packet["days"][0]["date"]
+    packet["hrv_rmssd"] = [
+        {"ts": f"{yesterday}T05:00:00Z", "night_date": yesterday, "rmssd_ms": 37.5},
+        {"ts": f"{yesterday}T06:00:00Z", "night_date": yesterday, "rmssd_ms": 42.0},
+    ]
+    response = health_sync.ingest_payload(conn, packet)
+    assert response["received_hrv"] == 1
+    row = conn.execute("SELECT rmssd_ms,source FROM hrv_daily WHERE night_date=?", (yesterday,)).fetchone()
+    assert row["rmssd_ms"] == 42.0 and row["source"] == "health_connect"
+    assert health_sync.ingest_payload(conn, packet)["received_hrv"] == 1
+    assert conn.execute("SELECT COUNT(*) FROM hrv_daily").fetchone()[0] == 1
+
+def test_hrv_from_other_source_is_not_overwritten(conn):
+    packet = sample_data()
+    yesterday = packet["days"][0]["date"]
+    conn.execute("INSERT INTO hrv_daily(night_date,rmssd_ms,source) VALUES(?, ?, 'zepp')", (yesterday, 39.0))
+    conn.commit()
+    packet["hrv_rmssd"] = [{"night_date": yesterday, "ts": f"{yesterday}T08:00:00Z", "rmssd_ms": 60.0}]
+    health_sync.ingest_payload(conn, packet)
+    row = conn.execute("SELECT rmssd_ms,source FROM hrv_daily WHERE night_date=?", (yesterday,)).fetchone()
+    assert row["rmssd_ms"] == 39.0 and row["source"] == "zepp"
+
+def test_invalid_hrv_aborts_all_writes(conn):
+    packet=sample_data()
+    yesterday=packet["days"][0]["date"]
+    packet["hrv_rmssd"]=[{"night_date":yesterday,"ts":f"{yesterday}T04:00:00Z","rmssd_ms":-5.0}]
+    with pytest.raises(ValueError):
+        health_sync.ingest_payload(conn, packet)
+    assert conn.execute("SELECT COUNT(*) FROM hr_samples").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM hrv_daily").fetchone()[0] == 0
+
 def test_daily_updates_are_replacements_not_sums(conn):
     payload = sample_data()
     health_sync.ingest_payload(conn, payload)

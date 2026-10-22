@@ -88,7 +88,9 @@ object HealthSyncClient {
             if (answer.optString("status") != "ok") throw IllegalStateException("Risposta server non valida")
             val status = "OK: ${answer.optInt("new_hr_samples")} nuove FC, " +
                 "${answer.optInt("received_sessions")} sessioni, " +
-                "${answer.optInt("received_days")} giorni • ${answer.optString("synced_at")}"
+                "${answer.optInt("received_days")} giorni, " +
+                "${answer.optInt("received_hrv")} HRV, " +
+                "${answer.optInt("received_spo2")} SpO2 • ${answer.optString("synced_at")}"
             prefs(context).edit().putString("last_status", status).apply()
             status
         } finally {

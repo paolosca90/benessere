@@ -61,7 +61,7 @@ jobs:
         run: gradle --no-daemon -p app-android :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: benessere-v0.2.2-debug
+          name: benessere-v0.2.3-debug
           path: app-android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
