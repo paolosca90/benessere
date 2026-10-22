@@ -100,7 +100,7 @@ jobs:
           echo "Final APK certificate verified"
       - uses: actions/upload-artifact@v4
         with:
-          name: benessere-v0.2.5-compatible
+          name: benessere-v0.2.6-compatible
           path: app-android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -124,7 +124,7 @@ jobs:
         run: gradle --no-daemon -p app-android :app:assembleDebug -PbenessereCanary
       - uses: actions/upload-artifact@v4
         with:
-          name: benessere-v0.2.5-TEST-installabile
+          name: benessere-v0.2.6-TEST-installabile
           path: app-android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 

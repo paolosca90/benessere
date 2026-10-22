@@ -48,6 +48,8 @@ import com.benessere.app.health.HealthConnectReader
 import com.benessere.app.health.HealthSyncClient
 import com.benessere.app.health.HealthSyncScheduler
 import com.benessere.app.health.LiveHeartUploader
+import com.benessere.app.health.LiveHeartService
+import com.benessere.app.health.LiveHeartRuntime
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -159,7 +161,6 @@ fun BenessereApp() {
     val bleClient = remember { HuamiBleClient(context) }
     val bleLog = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     val bleDevices = remember { androidx.compose.runtime.mutableStateMapOf<String, HuamiBleClient.DiscoveredDevice>() }
-    var liveHr by remember { mutableStateOf<Int?>(null) }
     val liveUploader = remember { LiveHeartUploader(context) }
     var liveUploadEnabled by remember { mutableStateOf(liveUploader.enabled()) }
     var liveUploadStatus by remember { mutableStateOf("Invio disattivato. I battiti sono visibili solo sul telefono.") }
@@ -345,12 +346,7 @@ fun BenessereApp() {
                     bleClient.listener = object : HuamiBleClient.Listener {
                         override fun onLog(line: String) { bleLog.add(0, line); if (bleLog.size > 50) bleLog.removeAt(bleLog.size - 1) }
                         override fun onHeartRate(bpm: Int) {
-                            liveHr = bpm
-                            val inForeground = (context as? ComponentActivity)?.lifecycle
-                                ?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true
-                            if (liveUploadEnabled && inForeground) {
-                                liveUploader.offer(bpm) { liveUploadStatus = it }
-                            }
+                            // Lo streaming persistente è gestito dal servizio foreground.
                         }
                         override fun onAuthResult(success: Boolean) {}
                         override fun onDeviceFound(device: HuamiBleClient.DiscoveredDevice) {
@@ -359,16 +355,31 @@ fun BenessereApp() {
                     }
                     if (permissionsGranted) bleClient.startScan() else permissionLauncher.launch(btPermissions.toTypedArray())
                 }) { Text("Scansiona") }
-                Button(onClick = { bleClient.disconnect() }) { Text("Disconnetti") }
+                Button(onClick = {
+                    bleClient.disconnect()
+                    context.stopService(Intent(context, LiveHeartService::class.java))
+                    liveUploadStatus = "Ricevitore Bluetooth interrotto manualmente."
+                }) { Text("Disconnetti") }
             }
             Text("Dispositivi unici rilevati: ${bleDevices.size}. Lo stesso indirizzo non viene più mostrato a ogni segnale BLE.")
             bleDevices.values.sortedByDescending { it.rssi }.forEach { device ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("${device.name} · ${device.address} · ${device.rssi} dBm",
                         modifier = Modifier.weight(1f))
-                    Button(enabled = permissionsGranted, onClick = {
-                        bleClient.connectStandardHeartRate(device.address)
-                    }) { Text("FC standard") }
+                    Button(enabled = permissionsGranted && liveUploadEnabled, onClick = {
+                        bleClient.stopScan()
+                        runCatching {
+                            ContextCompat.startForegroundService(
+                                context,
+                                Intent(context, LiveHeartService::class.java).apply {
+                                    action = LiveHeartService.ACTION_START
+                                    putExtra(LiveHeartService.EXTRA_ADDRESS, device.address)
+                                }
+                            )
+                        }.onFailure {
+                            liveUploadStatus = "Avvio ricevitore fallito: ${it.message ?: "errore Android"}"
+                        }
+                    }) { Text("Avvia FC stabile") }
                 }
             }
             Text("Gli indirizzi BLE possono essere temporanei. «FC standard» legge solo il profilo cardiaco 180D; il trasporto Zepp FED0 non è necessario per questa lettura.")
@@ -378,16 +389,20 @@ fun BenessereApp() {
                     onCheckedChange = { checked ->
                         liveUploader.setEnabled(checked)
                         liveUploadEnabled = checked
+                        if (!checked) context.stopService(Intent(context, LiveHeartService::class.java))
                         liveUploadStatus = if (checked)
-                            "Invio attivo soltanto mentre questa schermata è aperta e la FC Bluetooth arriva. Richiede indirizzo HTTPS e token server configurati."
-                        else "Invio FC live disattivato."
+                            "Consenso attivo. Seleziona un dispositivo con «Avvia FC stabile». Richiede HTTPS e token server."
+                        else "Invio FC live disattivato; ricevitore fermato."
                     }
                 )
                 Text("Invia FC Bluetooth live alla dashboard (consenso esplicito)")
             }
             Text(liveUploadStatus, style = MaterialTheme.typography.bodySmall)
-            Text("Massimo 1 campione ogni 3 secondi. La dashboard lo mostra per pochi minuti, separato dai dati Health Connect.")
-            liveHr?.let { Text("FC live: $it bpm", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary) }
+            Text(LiveHeartRuntime.status, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary)
+            Text(if (LiveHeartRuntime.running) "Ricevitore in background attivo" else "Ricevitore non attivo")
+            Text("Massimo 1 campione reale ogni 3 secondi. Ricezione anche a schermo spento tramite notifica persistente. Nessun dato simulato.")
+            LiveHeartRuntime.bpm?.let { Text("Ultima FC Bluetooth: $it bpm", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary) }
             OutlinedTextField(
                 value = mac, onValueChange = { mac = it },
                 label = { Text("MAC dello strap (es. C8:00:00:00:00:00)") },

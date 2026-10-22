@@ -45,12 +45,14 @@ class HuamiBleClient(private val context: Context) {
         fun onHeartRate(bpm: Int)
         fun onAuthResult(success: Boolean)
         fun onDeviceFound(device: DiscoveredDevice) {}
+        fun onLinkState(connected: Boolean, status: Int) {}
+        fun onStreamReady() {}
     }
 
     var listener: Listener? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var adapter: BluetoothAdapter? = null
-    private var gatt: BluetoothGatt? = null
+    @Volatile private var gatt: BluetoothGatt? = null
     private var authKey: ByteArray = ByteArray(16)
     private var standardHeartOnly: Boolean = false
     private var scanCallback: ScanCallback? = null
@@ -144,6 +146,9 @@ class HuamiBleClient(private val context: Context) {
             return
         }
         stopScan()
+        val old = gatt
+        gatt = null
+        old?.close()
         log("Connessione a ${device.name ?: macAddress} …")
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
@@ -155,8 +160,9 @@ class HuamiBleClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun connectStandardHeartRate(address: String) {
         stopScan()
-        gatt?.close()
+        val old = gatt
         gatt = null
+        old?.close()
         standardHeartOnly = true
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         adapter = manager?.adapter
@@ -172,9 +178,10 @@ class HuamiBleClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun disconnect() {
         stopScan()
-        gatt?.disconnect()
-        gatt?.close()
+        val old = gatt
         gatt = null
+        old?.disconnect()
+        old?.close()
         log("Disconnesso")
     }
 
@@ -182,14 +189,28 @@ class HuamiBleClient(private val context: Context) {
 
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            if (g !== gatt) {
+                g.close() // callback tardivo di una connessione già sostituita
+                return
+            }
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
+                    if (status != BluetoothGatt.GATT_SUCCESS) {
+                        g.disconnect()
+                        return
+                    }
+                    mainHandler.post { listener?.onLinkState(true, status) }
                     log("Connesso, discovery servizi…")
-                    g.discoverServices()
+                    if (!g.discoverServices()) g.disconnect()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
+                    gatt = null
+                    g.close()
                     log("Disconnesso (status=$status)")
-                    listener?.onAuthResult(false)
+                    mainHandler.post {
+                        listener?.onLinkState(false, status)
+                        listener?.onAuthResult(false)
+                    }
                 }
             }
         }
@@ -198,6 +219,7 @@ class HuamiBleClient(private val context: Context) {
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 log("Discovery servizi fallita (status=$status)")
+                g.disconnect()
                 return
             }
             if (standardHeartOnly) {
@@ -206,10 +228,15 @@ class HuamiBleClient(private val context: Context) {
                 if (hr == null) {
                     log("Questo dispositivo non espone il servizio FC standard 180D. " +
                         "Lo streaming Helio via trasporto Zepp FED0 non è ancora supportato.")
+                    g.disconnect()
                     return
                 }
-                enableNotifications(g, hr)
-                log("Servizio FC standard trovato; ascolto i dati, senza scrivere sullo Strap.")
+                if (!enableNotifications(g, hr)) {
+                    log("Attivazione notifiche FC non riuscita")
+                    g.disconnect()
+                    return
+                }
+                log("Servizio FC standard trovato; attendo conferma sottoscrizione CCC.")
                 return
             }
             val fee1 = g.getService(HuamiProtocol.SERVICE_MIBAND2)
@@ -226,6 +253,21 @@ class HuamiBleClient(private val context: Context) {
                 HuamiProtocol.AUTH_SEND_KEY, HuamiProtocol.AUTH_BYTE
             ) + authKey
             write(g, authChar, step1)
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            if (g !== gatt) return
+            if (standardHeartOnly &&
+                descriptor.characteristic.uuid == HuamiProtocol.CHARACTERISTIC_HEART_RATE_MEASUREMENT
+            ) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    mainHandler.post { listener?.onStreamReady() }
+                } else {
+                    log("Sottoscrizione FC fallita (GATT $status)")
+                    g.disconnect()
+                }
+            }
         }
 
         @SuppressLint("MissingPermission")
@@ -325,11 +367,11 @@ class HuamiBleClient(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun enableNotifications(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-        g.setCharacteristicNotification(characteristic, true)
-        val ccc = characteristic.getDescriptor(HuamiProtocol.CCC_DESCRIPTOR) ?: return
+    private fun enableNotifications(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic): Boolean {
+        if (!g.setCharacteristicNotification(characteristic, true)) return false
+        val ccc = characteristic.getDescriptor(HuamiProtocol.CCC_DESCRIPTOR) ?: return false
         ccc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        g.writeDescriptor(ccc)
+        return g.writeDescriptor(ccc)
     }
 
     @SuppressLint("MissingPermission")
