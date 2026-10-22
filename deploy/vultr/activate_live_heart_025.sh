@@ -35,11 +35,14 @@ restore() {
   if [ -f "$BACKUP/sync_server.py" ]; then
     cp -p "$BACKUP/sync_server.py" "$SOURCE/sync_server.py"
   fi
-  if [ -f "$BACKUP/live-heart-absent" ]; then
-    rm -f "$SOURCE/benessere/live_heart.py"
-  elif [ -f "$BACKUP/live_heart.py" ]; then
-    cp -p "$BACKUP/live_heart.py" "$SOURCE/benessere/live_heart.py"
-  fi
+  # Restore exactly the previous Python dependency set.
+  for module in live_heart alarm_settings health_sync; do
+    if [ -f "$BACKUP/$module-absent" ]; then
+      rm -f "$SOURCE/benessere/$module.py"
+    elif [ -f "$BACKUP/$module.py" ]; then
+      cp -p "$BACKUP/$module.py" "$SOURCE/benessere/$module.py"
+    fi
+  done
 
   docker tag "$OLD_API" benessere-api-v2:preview
   docker tag "$OLD_PWA" benessere-pwa-preview:preview
@@ -79,14 +82,16 @@ OLD_STAGE=$(git -C "$STAGE" rev-parse HEAD)
 [ "$OLD_STAGE" != "$REV" ] ||
   fail "Staging già al commit live: controllare prima lo stato dei servizi."
 
-report "Backup coerente del database e dei due moduli interessati"
+report "Backup coerente del database e dei moduli Python interessati"
 install -d -m 700 "$BACKUP"
 cp -p "$SOURCE/sync_server.py" "$BACKUP/sync_server.py"
-if [ -f "$SOURCE/benessere/live_heart.py" ]; then
-  cp -p "$SOURCE/benessere/live_heart.py" "$BACKUP/live_heart.py"
-else
-  : > "$BACKUP/live-heart-absent"
-fi
+for module in live_heart alarm_settings health_sync; do
+  if [ -f "$SOURCE/benessere/$module.py" ]; then
+    cp -p "$SOURCE/benessere/$module.py" "$BACKUP/$module.py"
+  else
+    : > "$BACKUP/$module-absent"
+  fi
+done
 python3 - "$DB" "$BACKUP/benessere.db" <<'PY'
 import sqlite3, sys
 source=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True, timeout=30)
@@ -124,16 +129,28 @@ report "Allineamento worktree della sola dashboard"
 git -C "$STAGE" checkout --detach "$REV"
 docker compose -p benessere-v2 -f "$COMPOSE" config --quiet
 
-report "Aggiornamento modulo live dell'API Android"
-python3 - "$STAGE/sync_server.py" "$STAGE/benessere/live_heart.py" <<'PY'
+report "Aggiornamento ricevitore e dipendenze con verifica preventiva"
+python3 - "$STAGE/sync_server.py" \
+  "$STAGE/benessere/alarm_settings.py" \
+  "$STAGE/benessere/health_sync.py" \
+  "$STAGE/benessere/live_heart.py" <<'PY'
 import ast,sys
 for item in sys.argv[1:]:
     ast.parse(open(item, encoding="utf-8").read(), filename=item)
-print("Moduli Python validi.")
+print("Sintassi di tutte le dipendenze Python verificata.")
 PY
 cp "$STAGE/sync_server.py" "$SOURCE/sync_server.py"
-cp "$STAGE/benessere/live_heart.py" "$SOURCE/benessere/live_heart.py"
-chmod 644 "$SOURCE/sync_server.py" "$SOURCE/benessere/live_heart.py"
+for module in alarm_settings health_sync live_heart; do
+  cp "$STAGE/benessere/$module.py" "$SOURCE/benessere/$module.py"
+done
+chmod 644 "$SOURCE/sync_server.py" "$SOURCE/benessere/alarm_settings.py" \
+  "$SOURCE/benessere/health_sync.py" "$SOURCE/benessere/live_heart.py"
+# Reproduce the container runtime's imports with no network, no production DB,
+# and a read-only code mount. Fail before stopping any running service.
+docker run --rm --network none --read-only \
+  --cap-drop ALL --security-opt no-new-privileges \
+  -v "$SOURCE:/app:ro" -w /app --entrypoint python python:3.12-slim \
+  -c 'import sync_server; from benessere import alarm_settings, health_sync, live_heart; print("All Android receiver imports OK")'
 
 report "Riavvio del solo ricevitore Android"
 docker restart benessere-api >/dev/null
