@@ -71,10 +71,32 @@ jobs:
           install -d -m 700 "$HOME/.android"
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
           chmod 600 "$HOME/.android/debug.keystore"
-          keytool -list -keystore "$HOME/.android/debug.keystore"             -storepass android -alias androiddebugkey >/dev/null
-          echo "Original Android signing identity restored"
+          keytool -list -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey >/dev/null
+          # Reference SHA256: independently observed in APKs 0.1.0/0.2.0/0.2.1
+          # and the old Windows signing keystore.
+          EXPECTED_FINGERPRINT="F6C7A9C56DDE973E28C59AD6C5D6B6CD62374DC7F69A885432C79555B29DB796"
+          ACTUAL_FINGERPRINT="$(keytool -exportcert \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey | sha256sum | awk '{print toupper($1)}')"
+          if [ "$ACTUAL_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "::error::Keystore does NOT match the original signing certificate."
+            echo "Expected $EXPECTED_FINGERPRINT; received $ACTUAL_FINGERPRINT"
+            exit 1
+          fi
+          echo "Original signing certificate SHA-256 matches"
       - name: Assemble APK with original signing identity
         run: gradle --no-daemon -p app-android :app:assembleDebug
+      - name: Verify built APK signing certificate before upload
+        run: |
+          APK="app-android/app/build/outputs/apk/debug/app-debug.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" > /tmp/benessere-apk-cert.txt
+          EXPECTED="f6c7a9c56dde973e28c59ad6c5d6b6cd62374dc7f69a885432c79555b29db796"
+          if ! grep -qiF "Signer #1 certificate SHA-256 digest: $EXPECTED" /tmp/benessere-apk-cert.txt; then
+            echo "::error::APK signed with a different certificate; refusing to publish."
+            exit 1
+          fi
+          echo "Final APK certificate verified"
       - uses: actions/upload-artifact@v4
         with:
           name: benessere-v0.2.5-compatible
