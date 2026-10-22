@@ -14,7 +14,9 @@ type LiveData={
  expiry_seconds:number;
 };
 
-export default function LiveHeartPanel(){
+export type LiveHeartSnapshot = Pick<LiveData,"status"|"bpm"|"last_received_at">;
+
+export default function LiveHeartPanel({onSnapshot}:{onSnapshot?:(snapshot:LiveHeartSnapshot|null)=>void}){
  const [data,setData]=useState<LiveData|null>(null);
  const [error,setError]=useState("");
  useEffect(()=>{
@@ -25,15 +27,15 @@ export default function LiveHeartPanel(){
     const r=await fetch("/api/live-heart-rate",{cache:"no-store"});
     if(!r.ok)throw new Error("HTTP "+r.status);
     const result=await r.json() as LiveData;
-    if(active){setData(result);setError("");}
+    if(active){setData(result);setError("");onSnapshot?.(result);}
    }catch{
-    if(active){setData(null);setError("Collegamento alla FC live non disponibile");}
+    if(active){setData(null);setError("Collegamento alla FC live non disponibile");onSnapshot?.(null);}
    }
   }
   void poll();
   const interval=window.setInterval(()=>{void poll()},3000);
   return ()=>{active=false;window.clearInterval(interval)};
- },[]);
+ },[onSnapshot]);
  const live=data?.status==="live";
  const samples=data?.points||[];
  return <section className="card" aria-live="polite">
@@ -63,8 +65,8 @@ export default function LiveHeartPanel(){
    </ResponsiveContainer>
   </div>:null}
   <div className="small" style={{marginTop:10}}>
-   Dati separati dalla sincronizzazione Health Connect. Aggiornamenti visibili soltanto
-   quando Benessere Android invia la FC con consenso attivo.
+   Dati separati da Health Connect. Per restare online servono nuovi battiti ogni 15 secondi:
+   mantieni Benessere Android aperta in primo piano, con schermo attivo e Bluetooth connesso.
   </div>
  </section>;
 }

@@ -3,7 +3,7 @@ import {useCallback,useEffect,useState} from "react";
 import {Activity,AlarmClock,Apple,ArrowUpRight,Bell,Dumbbell,HeartPulse,Home,LoaderCircle,Moon,RefreshCcw,Scale,ShieldCheck,TrendingUp,Utensils,Watch,WifiOff} from "lucide-react";
 import {ResponsiveContainer,LineChart,Line,CartesianGrid,XAxis,YAxis,Tooltip,BarChart,Bar} from "recharts";
 import JournalPanel from "./components/JournalPanel";
-import LiveHeartPanel from "./components/LiveHeartPanel";
+import LiveHeartPanel, {type LiveHeartSnapshot} from "./components/LiveHeartPanel";
 
 type Section="oggi"|"salute"|"allenamento"|"alimentazione"|"progressi"|"diario"|"sveglia";
 type Numeric=null|number;
@@ -66,6 +66,8 @@ function TrendsChart({data,kind}:{data:Trends,kind:"heart"|"sleep"|"steps"|"weig
 export default function Page(){
  const [section,setSection]=useState<Section>("oggi");
  const [summary,setSummary]=useState<Summary|null>(null);
+ const [liveHeart,setLiveHeart]=useState<LiveHeartSnapshot|null>(null);
+ const [lastUpdated,setLastUpdated]=useState<Date|null>(null);
  const [trends,setTrends]=useState<Trends|null>(null);
  const [strength,setStrength]=useState<Strength|null>(null);
  const [alarm,setAlarm]=useState<Alarm|null>(null);
@@ -74,8 +76,8 @@ export default function Page(){
  const [error,setError]=useState("");
  const [message,setMessage]=useState("");
  const [days,setDays]=useState(30);
- const load=useCallback(async()=>{
-  setLoading(true);setError("");
+ const load=useCallback(async(silent=false)=>{
+  if(!silent){setLoading(true);setError("");}
   try {
    const [s,h,p,a]=await Promise.all([
      api<Summary>("/api/summary"),
@@ -83,11 +85,23 @@ export default function Page(){
      api<Strength>("/api/strength"),
      api<Alarm>("/api/alarm")
    ]);
-   setSummary(s);setTrends(h);setStrength(p);setAlarm(a);
+   setSummary(s);setTrends(h);setStrength(p);setAlarm(a);setLastUpdated(new Date());setError("");
   }catch(e){setError(e instanceof Error?e.message:"Errore sconosciuto");}
   finally{setLoading(false);}
  },[days]);
- useEffect(()=>{void load()},[load]);
+ useEffect(()=>{
+  void load();
+  // Rileggi i dati storici ogni 30s senza causare un nuovo caricamento visibile.
+  // La FC Bluetooth diretta ha un polling separato ogni 3s.
+  const interval=window.setInterval(()=>{
+   if(document.visibilityState==="visible")void load(true);
+  },30000);
+  const refreshVisible=()=>{
+   if(document.visibilityState==="visible")void load(true);
+  };
+  document.addEventListener("visibilitychange",refreshVisible);
+  return ()=>{window.clearInterval(interval);document.removeEventListener("visibilitychange",refreshVisible);};
+ },[load]);
  useEffect(()=>{
   if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
  },[]);
@@ -121,7 +135,7 @@ export default function Page(){
   <main className="main">
    <header className="topbar">
     <div><div className="eyebrow">Personal health hub</div><h1>{title}</h1><div className="date">{new Intl.DateTimeFormat("it-IT",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).format(new Date())}</div></div>
-    <div className="actions"><button className="iconbtn" aria-label="Ricarica dati" onClick={()=>void load()}><RefreshCcw size={20}/></button>
+    <div className="actions">{lastUpdated&&<span className="small">Riepilogo aggiornato alle {lastUpdated.toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</span>}<button className="iconbtn" aria-label="Ricarica dati" onClick={()=>void load()}><RefreshCcw size={20}/></button>
     <button className="iconbtn" aria-label="Impostazioni sveglia" onClick={()=>setSection("sveglia")}><Bell size={20}/></button></div>
    </header>
    {error&&<div className="notice warn" role="alert">{error}</div>}
@@ -134,12 +148,17 @@ export default function Page(){
     <div className="quick"><button className="btn secondary" onClick={()=>setSection("diario")}>Registra pasto o allenamento <ArrowUpRight size={14}/></button></div></div>
     <div className="grid four">
      <Value label="Sonno rilevato" icon={Moon} value={number(summary?.health.sleep?.duration_h??null,1)} unit="ore" note={summary?.health.sleep?.accuracy==="fasi"?"Fasi disponibili":"Copertura da verificare"}/>
-     <Value label="Ultimo battito" icon={HeartPulse} value={number(summary?.health.heart?.bpm??null)} unit="bpm" note={summary?.health.heart?.at?fmt(summary.health.heart.at):"Non rilevato"}/>
+     <Value label={liveHeart?.status==="live"?"FC diretta · Helio Strap":"Ultimo battito · Health Connect"}
+       icon={HeartPulse}
+       value={number(liveHeart?.status==="live"?liveHeart.bpm:(summary?.health.heart?.bpm??null))}
+       unit="bpm"
+       note={liveHeart?.status==="live"?"Bluetooth live · "+fmt(liveHeart.last_received_at):
+         summary?.health.heart?.at?fmt(summary.health.heart.at):"Non rilevato"}/>
      <Value label="Passi" icon={Activity} value={number(summary?.health.steps??null)} note="Giornata selezionata"/>
      <Value label="HRV RMSSD" icon={Watch} value={number(summary?.health.hrv?.rmssd_ms??null,1)} unit="ms" note="Solo dati realmente disponibili"/>
     </div>
     <SectionHeader title="Frequenza cardiaca in tempo reale"/>
-    <div className="grid two"><LiveHeartPanel/></div>
+    <div className="grid two"><LiveHeartPanel onSnapshot={setLiveHeart}/></div>
     <SectionHeader title="Nutrizione" note="Oggi"/>
     <div className="grid two"><Card>
       <div className="cardlabel"><Utensils size={16}/> Energia registrata</div>
