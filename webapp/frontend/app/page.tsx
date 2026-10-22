@@ -148,12 +148,12 @@ export default function Page(){
     <div className="quick"><button className="btn secondary" onClick={()=>setSection("diario")}>Registra pasto o allenamento <ArrowUpRight size={14}/></button></div></div>
     <div className="grid four">
      <Value label="Sonno rilevato" icon={Moon} value={number(summary?.health.sleep?.duration_h??null,1)} unit="ore" note={summary?.health.sleep?.accuracy==="fasi"?"Fasi disponibili":"Copertura da verificare"}/>
-     <Value label={liveHeart?.status==="live"?"FC diretta · Helio Strap":"Ultimo battito · Health Connect"}
+     <Value label="Ultimo battito"
        icon={HeartPulse}
        value={number(liveHeart?.status==="live"?liveHeart.bpm:(summary?.health.heart?.bpm??null))}
        unit="bpm"
-       note={liveHeart?.status==="live"?"Bluetooth live · "+fmt(liveHeart.last_received_at):
-         summary?.health.heart?.at?fmt(summary.health.heart.at):"Non rilevato"}/>
+       note={liveHeart?.status==="live"?"LIVE Bluetooth · "+fmt(liveHeart.last_received_at):
+         summary?.health.heart?.at?"Health Connect · "+fmt(summary.health.heart.at):"Non rilevato"}/>
      <Value label="Passi" icon={Activity} value={number(summary?.health.steps??null)} note="Giornata selezionata"/>
      <Value label="HRV RMSSD" icon={Watch} value={number(summary?.health.hrv?.rmssd_ms??null,1)} unit="ms" note="Solo dati realmente disponibili"/>
     </div>
