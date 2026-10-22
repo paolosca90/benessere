@@ -5,6 +5,8 @@ COPY webapp/api/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY benessere /app/benessere
 COPY webapp/api /app/webapp/api
+ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
 RUN useradd --system --uid 10001 --home-dir /app benessere
 USER 10001
 EXPOSE 8780

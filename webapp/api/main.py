@@ -74,3 +74,6 @@ class AlarmBody(BaseModel):
 def put_alarm(payload:AlarmBody,conn=Depends(connection)):
     try:return alarm_settings.save(conn,payload.model_dump())
     except ValueError as exc:raise HTTPException(status_code=422,detail=str(exc))
+
+from .journal import router as journal_router
+app.include_router(journal_router)

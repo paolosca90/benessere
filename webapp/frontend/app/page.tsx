@@ -2,8 +2,9 @@
 import {useCallback,useEffect,useState} from "react";
 import {Activity,AlarmClock,Apple,ArrowUpRight,Bell,Dumbbell,HeartPulse,Home,LoaderCircle,Moon,RefreshCcw,Scale,ShieldCheck,TrendingUp,Utensils,Watch,WifiOff} from "lucide-react";
 import {ResponsiveContainer,LineChart,Line,CartesianGrid,XAxis,YAxis,Tooltip,BarChart,Bar} from "recharts";
+import JournalPanel from "./components/JournalPanel";
 
-type Section="oggi"|"salute"|"allenamento"|"alimentazione"|"progressi"|"sveglia";
+type Section="oggi"|"salute"|"allenamento"|"alimentazione"|"progressi"|"diario"|"sveglia";
 type Numeric=null|number;
 type Day={date:string,steps:Numeric,weight_kg:Numeric,active_kcal:Numeric,total_kcal:Numeric,resting_hr:Numeric,source?:string};
 type Sleep={date:string,duration_h:Numeric,accuracy?:string,deep_min:Numeric,light_min:Numeric,rem_min:Numeric,source?:string};
@@ -15,7 +16,7 @@ type Summary={date:string,health:Health,nutrition:Nutrition,workouts:Workout[],a
 type Trends={daily:Day[],sleeps:Sleep[],hr_hourly:{at:string,average_bpm:number,min_bpm:number,max_bpm:number}[],hrv:{date:string,rmssd_ms:Numeric}[],last_heart:Heart|null,counts:{days:number,sleep_nights:number,heart_samples:number,hrv_nights:number},sync:{last_sync:string|null}};
 type Strength={maxes:Record<string,unknown>[]};
 type Alarm={revision:number,enabled:boolean,deadline:string,window_minutes:number,weekdays:number[],mode:string,delivery:string,updated_at:string|null,device_ack:{revision:number,installed:number,error:string,received_at:string}|null,strap_control:string};
-const labels:Record<Section,string>={oggi:"Oggi",salute:"Salute",allenamento:"Allenamento",alimentazione:"Nutrizione",progressi:"Progressi",sveglia:"Sveglia"};
+const labels:Record<Section,string>={oggi:"Oggi",salute:"Salute",allenamento:"Allenamento",alimentazione:"Nutrizione",progressi:"Progressi",diario:"Diario",sveglia:"Sveglia"};
 const mainSections:Section[]=["oggi","salute","allenamento","alimentazione","progressi"];
 const navIcons=[Home,HeartPulse,Dumbbell,Utensils,TrendingUp];
 const number=(n:Numeric,precision=0)=> n==null?"—":new Intl.NumberFormat("it-IT",{maximumFractionDigits:precision}).format(n);
@@ -112,6 +113,7 @@ export default function Page(){
    <nav className="nav" aria-label="Navigazione principale">
    {mainSections.map((s,i)=>{const Icon=navIcons[i];return <button key={s} className={"navbtn "+(section===s?"active":"")} onClick={()=>setSection(s)}>
      <Icon size={19}/>{labels[s]}</button>})}
+   <button className={"navbtn "+(section==="diario"?"active":"")} onClick={()=>setSection("diario")}><Dumbbell size={19}/>Diario completo</button>
    <button className={"navbtn "+(section==="sveglia"?"active":"")} onClick={()=>setSection("sveglia")}><AlarmClock size={19}/>Sveglia</button>
    </nav><div className="sidebar-foot">Dati personali · accesso riservato<br/>Nessuna misura simulata</div>
   </aside>
@@ -128,7 +130,7 @@ export default function Page(){
     <div className="hero"><div className="eyebrow">Riepilogo quotidiano</div>
     <h2>La tua salute, senza rumore.</h2>
     <p>Allenamento, recupero e alimentazione in un'unica vista. Le misure mancanti rimangono esplicite.</p>
-    <div className="quick"><button className="btn secondary" onClick={()=>setSection("alimentazione")}>Diario alimentare <ArrowUpRight size={14}/></button></div></div>
+    <div className="quick"><button className="btn secondary" onClick={()=>setSection("diario")}>Registra pasto o allenamento <ArrowUpRight size={14}/></button></div></div>
     <div className="grid four">
      <Value label="Sonno rilevato" icon={Moon} value={number(summary?.health.sleep?.duration_h??null,1)} unit="ore" note={summary?.health.sleep?.accuracy==="fasi"?"Fasi disponibili":"Copertura da verificare"}/>
      <Value label="Ultimo battito" icon={HeartPulse} value={number(summary?.health.heart?.bpm??null)} unit="bpm" note={summary?.health.heart?.at?fmt(summary.health.heart.at):"Non rilevato"}/>
@@ -199,6 +201,7 @@ export default function Page(){
        <div className="small">{String(record.date||"Data non specificata")}</div></Card>
      })}</div>:<Empty message="Massimali non disponibili nel servizio di lettura."/>}
    </div>}
+   {section==="diario"&&<JournalPanel changed={()=>{void load()}}/>}
    {section==="sveglia"&&<div>
     <div className="hero"><div className="eyebrow">Sonno e risveglio</div><h2>Programma dal web. Esegui sul telefono.</h2>
      <p>L'allarme deve essere confermato dall'app Android. La vibrazione diretta di Helio Strap resta configurabile in Zepp, non in Benessere.</p></div>
@@ -230,6 +233,7 @@ export default function Page(){
   <nav className="mobile-nav" aria-label="Navigazione mobile">
    {mainSections.map((s,i)=>{const Icon=navIcons[i];return <button key={s} className={section===s?"active":""} onClick={()=>setSection(s)}>
     <Icon size={20}/><span>{labels[s]}</span></button>})}
+   <button className={section==="diario"?"active":""} onClick={()=>setSection("diario")}><Dumbbell size={20}/><span>Diario</span></button>
   </nav>
  </div>;
 }

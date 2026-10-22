@@ -71,8 +71,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build API and PWA images outside VPS
         run: |
-          docker build -t benessere-api-v2:preview -f webapp/api/Dockerfile .
-          docker build -t benessere-pwa-preview:preview -f webapp/frontend/Dockerfile webapp/frontend
+          SOURCE_REVISION="${{ github.event.pull_request.head.sha || github.sha }}"
+          docker build --build-arg SOURCE_REVISION="$SOURCE_REVISION" -t benessere-api-v2:preview -f webapp/api/Dockerfile .
+          docker build --build-arg SOURCE_REVISION="$SOURCE_REVISION" -t benessere-pwa-preview:preview -f webapp/frontend/Dockerfile webapp/frontend
           docker save benessere-api-v2:preview benessere-pwa-preview:preview | gzip -1 > /tmp/benessere-preview-images.tar.gz
       - uses: actions/upload-artifact@v4
         with:
