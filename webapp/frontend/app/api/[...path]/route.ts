@@ -1,7 +1,7 @@
 import {NextRequest,NextResponse} from "next/server";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
-const allowed=new Set(["summary","health-trends","strength","alarm","journal",
+const allowed=new Set(["summary","health-trends","strength","alarm","live-heart-rate","journal",
   "meal","workout","workout-block","max","wod","result","photo","day-mode","profile"]);
 const kinds=new Set(["meals","workouts","wods","results","maxes","photos","profile"]);
 async function proxy(req:NextRequest,ctx:{params:Promise<{path:string[]}>},method:"GET"|"PUT"|"POST") {

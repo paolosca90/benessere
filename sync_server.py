@@ -14,7 +14,7 @@ import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from benessere import alarm_settings, db, health_sync
+from benessere import alarm_settings, db, health_sync, live_heart
 
 TOKEN_PATH = Path(__file__).resolve().parent / "data" / "android_sync_token.txt"
 MAX_BODY_BYTES = 8 * 1024 * 1024
@@ -85,7 +85,7 @@ class HealthHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:
-        if self.path not in ("/api/v1/health-sync", "/api/v1/alarm-ack"):
+        if self.path not in ("/api/v1/health-sync", "/api/v1/alarm-ack", "/api/v1/live-heart-rate"):
             self._send(404, {"error": "not found"})
             return
         if not self._authorized():
@@ -105,7 +105,9 @@ class HealthHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             conn = db.connect()
             try:
-                if self.path == "/api/v1/alarm-ack":
+                if self.path == "/api/v1/live-heart-rate":
+                    result = live_heart.ingest(conn, payload)
+                elif self.path == "/api/v1/alarm-ack":
                     result = alarm_settings.acknowledge(
                         conn, payload.get("device_id"), payload.get("revision"),
                         payload.get("installed"), payload.get("error", ""))

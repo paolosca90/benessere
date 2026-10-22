@@ -3,6 +3,7 @@ import {useCallback,useEffect,useState} from "react";
 import {Activity,AlarmClock,Apple,ArrowUpRight,Bell,Dumbbell,HeartPulse,Home,LoaderCircle,Moon,RefreshCcw,Scale,ShieldCheck,TrendingUp,Utensils,Watch,WifiOff} from "lucide-react";
 import {ResponsiveContainer,LineChart,Line,CartesianGrid,XAxis,YAxis,Tooltip,BarChart,Bar} from "recharts";
 import JournalPanel from "./components/JournalPanel";
+import LiveHeartPanel from "./components/LiveHeartPanel";
 
 type Section="oggi"|"salute"|"allenamento"|"alimentazione"|"progressi"|"diario"|"sveglia";
 type Numeric=null|number;
@@ -137,6 +138,8 @@ export default function Page(){
      <Value label="Passi" icon={Activity} value={number(summary?.health.steps??null)} note="Giornata selezionata"/>
      <Value label="HRV RMSSD" icon={Watch} value={number(summary?.health.hrv?.rmssd_ms??null,1)} unit="ms" note="Solo dati realmente disponibili"/>
     </div>
+    <SectionHeader title="Frequenza cardiaca in tempo reale"/>
+    <div className="grid two"><LiveHeartPanel/></div>
     <SectionHeader title="Nutrizione" note="Oggi"/>
     <div className="grid two"><Card>
       <div className="cardlabel"><Utensils size={16}/> Energia registrata</div>
@@ -164,6 +167,7 @@ export default function Page(){
      <Value label="Notti HRV" icon={Activity} value={number(trends?.counts.hrv_nights??null)}/>
      <Value label="Giorni attività" icon={TrendingUp} value={number(trends?.counts.days??null)}/>
     </div>
+    <SectionHeader title="Helio Strap · Bluetooth live"/><div className="grid two"><LiveHeartPanel/></div>
     <SectionHeader title="Andamenti"/><div className="grid two">
      <Card><h3>Battito cardiaco (bpm)</h3>{trends&&<TrendsChart data={trends} kind="heart"/>}</Card>
      <Card><h3>Sonno registrato (ore)</h3>{trends&&<TrendsChart data={trends} kind="sleep"/>}</Card>
