@@ -127,6 +127,7 @@ class LiveHeartService : Service() {
         startForeground(NOTIFICATION_ID, notification("Monitoraggio Bluetooth attivo"))
         handler.removeCallbacks(retryTask)
         handler.removeCallbacks(watchdog)
+        retryQueued = false
         active = true
         LiveHeartRuntime.running = true
         LiveHeartRuntime.bpm = null
