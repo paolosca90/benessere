@@ -43,7 +43,7 @@
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
 
     <application
-        android:label="Benessere"
+        android:label="${benessereAppLabel}"
         android:supportsRtl="true"
         android:allowBackup="false"
         android:usesCleartextTraffic="true"

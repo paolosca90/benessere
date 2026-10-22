@@ -9,11 +9,16 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.benessere.app"
+        // Canary is installable beside the already-signed Benessere app.
+        // It never upgrades or alters the existing installation.
+        applicationId = if (project.hasProperty("benessereCanary"))
+            "com.benessere.app.canary" else "com.benessere.app"
+        manifestPlaceholders["benessereAppLabel"] =
+            if (project.hasProperty("benessereCanary")) "Benessere TEST" else "Benessere"
         minSdk = 28
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.2.3"
+        versionCode = 8
+        versionName = "0.2.4"
     }
 
     buildTypes {

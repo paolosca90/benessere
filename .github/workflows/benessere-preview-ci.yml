@@ -43,6 +43,9 @@ jobs:
       - run: npm run build
 
   android:
+    # Enable only after the user provisions the ORIGINAL local signing key
+    # as the encrypted secret. Without it, never publish incompatible upgrades.
+    if: vars.BENESSERE_SIGNING_READY == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,11 +60,48 @@ jobs:
           "$SDKMANAGER" --install "platforms;android-34" "build-tools;35.0.0" "platform-tools"
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: "8.13"}
-      - name: Assemble debug APK
+      - name: Restore original Android signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.BENESSERE_ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Original signing key missing. Refusing incompatible APK."
+            exit 1
+          fi
+          install -d -m 700 "$HOME/.android"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          keytool -list -keystore "$HOME/.android/debug.keystore"             -storepass android -alias androiddebugkey >/dev/null
+          echo "Original Android signing identity restored"
+      - name: Assemble APK with original signing identity
         run: gradle --no-daemon -p app-android :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: benessere-v0.2.3-debug
+          name: benessere-v0.2.4-compatible
+          path: app-android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  android-canary:
+    # Separate package name: does NOT replace the user's existing app or prefs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: "temurin", java-version: "17"}
+      - name: Configure Android SDK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" --install "platforms;android-34" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: "8.13"}
+      - name: Assemble isolated Benessere TEST APK
+        run: gradle --no-daemon -p app-android :app:assembleDebug -PbenessereCanary
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benessere-v0.2.4-TEST-installabile
           path: app-android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
