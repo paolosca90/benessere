@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 # Supporta 'uvicorn webapp.api.main:app' dalla radice della repository.
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-from benessere import alarm_settings, db, health_metrics, live_heart, nutrition, nutrition_schedule, physiological_load
+from benessere import alarm_settings, db, health_metrics, live_heart, nutrition, nutrition_schedule, physiological_load, sleep_stage_history
 
 app=FastAPI(title="Benessere API",version="2.0.0",docs_url=None,redoc_url=None,openapi_url=None)
 
@@ -69,6 +69,11 @@ def physiological_load_report(day: date | None = None,conn=Depends(connection)):
 def strength(conn=Depends(connection)):
     return {"maxes":[dict(x) for x in conn.execute(
         "SELECT * FROM strength_maxes ORDER BY date DESC,id DESC LIMIT 100").fetchall()]}
+
+@app.get("/v1/sleep-stage-history",dependencies=[Depends(auth)])
+def sleep_stage_timeline(day: date | None = None, conn=Depends(connection)):
+    """Finished-session stage history. Not a real-time sleep-state signal."""
+    return sleep_stage_history.report(conn, (day or date.today()).isoformat())
 
 @app.get("/v1/alarm",dependencies=[Depends(auth)])
 def get_alarm(conn=Depends(connection)):
