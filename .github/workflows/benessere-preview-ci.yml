@@ -9,6 +9,7 @@ on:
       - "app-android/**"
       - "tests/**"
       - "deploy/vultr/deploy_wod_details_safe.sh"
+      - "deploy/vultr/deploy_physio_readonly.sh"
       - ".github/workflows/benessere-preview-ci.yml"
   workflow_dispatch:
 permissions:
@@ -25,7 +26,7 @@ jobs:
         run: |
           pip install -r requirements.txt -r webapp/api/requirements.txt httpx==0.28.1
       - name: Validate targeted WOD deployment script syntax
-        run: bash -n deploy/vultr/deploy_wod_details_safe.sh
+        run: bash -n deploy/vultr/deploy_wod_details_safe.sh deploy/vultr/deploy_physio_readonly.sh
       - name: Unit / API tests (no real health data)
         run: python -m pytest tests -q
 
