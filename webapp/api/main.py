@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 # Supporta 'uvicorn webapp.api.main:app' dalla radice della repository.
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-from benessere import alarm_settings, db, health_metrics, live_heart, nutrition, nutrition_schedule
+from benessere import alarm_settings, db, health_metrics, live_heart, nutrition, nutrition_schedule, physiological_load
 
 app=FastAPI(title="Benessere API",version="2.0.0",docs_url=None,redoc_url=None,openapi_url=None)
 
@@ -56,6 +56,14 @@ def trends(days:int=Query(default=30,ge=1,le=90),conn=Depends(connection)):
 @app.get("/v1/live-heart-rate",dependencies=[Depends(auth)])
 def live_heart_rate(conn=Depends(connection)):
     return live_heart.snapshot(conn)
+
+@app.get("/v1/physiological-load",dependencies=[Depends(auth)])
+def physiological_load_report(day: date | None = None,conn=Depends(connection)):
+    """Read-only day/workout analysis from historical timestamped measurements."""
+    try:
+        return physiological_load.report(conn, day or date.today())
+    except ValueError as exc:
+        raise HTTPException(status_code=422,detail=str(exc)) from exc
 
 @app.get("/v1/strength",dependencies=[Depends(auth)])
 def strength(conn=Depends(connection)):
