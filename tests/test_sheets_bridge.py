@@ -37,6 +37,7 @@ class SheetsBridgeTests(unittest.TestCase):
         self.assertEqual(self.conn.execute("SELECT count(*) FROM workouts").fetchone()[0], 1)
         self.assertEqual(self.conn.execute("SELECT count(*) FROM wod_results").fetchone()[0], 1)
         self.assertEqual(self.conn.execute("SELECT score_value FROM wod_results").fetchone()[0], 1020)
+        self.assertEqual(self.conn.execute("SELECT wod_result_id FROM workouts").fetchone()[0], saved["result"]["wod_result_id"])
         self.assertIsNone(self.conn.execute("SELECT rpe FROM workouts").fetchone()[0])
 
     def test_revision_updates_rpe_load_and_full_wod_without_duplication(self):
