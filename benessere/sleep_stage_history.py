@@ -92,7 +92,8 @@ def report(conn: sqlite3.Connection, day: str) -> dict:
     """Read completed sleep records; never claim live availability."""
     from datetime import date
     target = date.fromisoformat(day).isoformat()
-    initialize(conn)
+    from . import health_sync
+    health_sync.initialize(conn)
     rows = conn.execute(
         """SELECT e.device_id,e.origin,e.record_id,e.start_at,e.end_at,
                   e.deep_min,e.light_min,e.rem_min,e.awake_min,e.duration_min,
