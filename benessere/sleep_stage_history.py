@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 ROME = ZoneInfo("Europe/Rome")
 KINDS = frozenset({"awake", "light", "deep", "rem", "sleeping", "unknown", "out_of_bed"})
-MAX_STAGES_PER_SESSION = 500
+MAX_STAGES_PER_SESSION = 2000
 
 
 def initialize(conn: sqlite3.Connection) -> None:
