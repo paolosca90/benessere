@@ -170,6 +170,26 @@ class HealthConnectReader(context: Context) {
                 .put("light_min", if (s.stages.isEmpty()) JSONObject.NULL else light)
                 .put("rem_min", if (s.stages.isEmpty()) JSONObject.NULL else rem)
                 .put("awake_min", if (s.stages.isEmpty()) JSONObject.NULL else awake)
+            // Completed-session history ONLY: never use these stages as a live
+            // sleep-stage stream or as authorization to vibrate Helio Strap.
+            if (s.stages.isNotEmpty()) {
+                val timeline = JSONArray()
+                s.stages.sortedBy { it.startTime }.forEach { stage ->
+                    val name = when (stage.stage) {
+                        SleepSessionRecord.STAGE_TYPE_DEEP -> "deep"
+                        SleepSessionRecord.STAGE_TYPE_LIGHT -> "light"
+                        SleepSessionRecord.STAGE_TYPE_REM -> "rem"
+                        SleepSessionRecord.STAGE_TYPE_AWAKE,
+                        SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED -> "awake"
+                        SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> "out_of_bed"
+                        SleepSessionRecord.STAGE_TYPE_SLEEPING -> "sleeping"
+                        else -> "unknown"
+                    }
+                    timeline.put(JSONObject().put("start", stage.startTime.toString())
+                        .put("end", stage.endTime.toString()).put("stage", name))
+                }
+                data.put("stages", timeline)
+            }
             sessions.put(data)
         }
         (if (allowed(ExerciseSessionRecord::class)) allRecords<ExerciseSessionRecord>(range, 2000) else emptyList()).forEach { s ->
