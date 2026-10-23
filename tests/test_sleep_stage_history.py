@@ -85,14 +85,15 @@ def test_no_sleep_stages_means_history_not_live(conn):
     [{"start": "2026-10-22T23:00:00", "end": "2026-10-23T00:00:00Z", "stage": "deep"}],
     [{"start": "2026-10-22T23:00:00Z", "end": "2026-10-22T23:00:00Z", "stage": "deep"}],
 ])
-def test_invalid_phases_reject_whole_sync_atomically(conn, stages):
+def test_invalid_phases_are_isolated_and_do_not_block_other_measurements(conn, stages):
     value = packet()
     value["sessions"][0]["stages"] = stages
-    with pytest.raises(ValueError):
-        health_sync.ingest_payload(conn, value)
-    assert conn.execute("SELECT COUNT(*) FROM hc_events").fetchone()[0] == 0
+    outcome = health_sync.ingest_payload(conn, value)
+    assert outcome["skipped_stage_sessions"] == 1
+    assert outcome["received_stage_intervals"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM hc_events").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM hc_sleep_stages").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM hr_samples").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM hr_samples").fetchone()[0] == 1
 
 
 def test_explicit_empty_update_replaces_timed_stages_but_never_fabricates(conn):
