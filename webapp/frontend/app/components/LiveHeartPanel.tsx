@@ -66,7 +66,7 @@ export default function LiveHeartPanel({onSnapshot}:{onSnapshot?:(snapshot:LiveH
   </div>:null}
   <div className="small" style={{marginTop:10}}>
    Dati separati da Health Connect. Per restare online servono nuovi battiti ogni 15 secondi:
-   mantieni Benessere Android aperta in primo piano, con schermo attivo e Bluetooth connesso.
+   avvia «FC stabile» su Benessere Android. Il servizio rimane attivo anche a schermo spento.
   </div>
  </section>;
 }
