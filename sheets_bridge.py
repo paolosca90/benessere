@@ -18,6 +18,7 @@ def apply_workout_revision(conn, key: str, data: dict) -> dict:
     """Rettifica in modo atomico lo stesso workout, inclusi RPE/carico e catalogo WOD."""
     import math
     from benessere import workout_details as details
+    details.initialize(conn)
     source = str(data.get("update_of") or "")
     if not source or source == key:
         raise ValueError("ID allenamento originale mancante")
@@ -91,7 +92,6 @@ def apply_workout_revision(conn, key: str, data: dict) -> dict:
             wod_notes = str(updated_wod["notes"])
             if len(wod_notes) > 1000:
                 raise ValueError("Note WOD troppo lunghe")
-    details.initialize(conn)
     conn.execute("BEGIN IMMEDIATE")
     try:
         again = conn.execute("SELECT result_json FROM sheets_bridge_events WHERE event_id=?", (key,)).fetchone()
