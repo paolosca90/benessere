@@ -8,7 +8,7 @@ type Hr = {
  average_bpm:number|null;max_bpm:number|null;min_bpm:number|null;
  sample_count:number;sampled_minutes:number;minute_bin_coverage_pct:number|null;
  sources:string[];reason:string|null;
- series:{offset_min:number;bpm:number;samples:number}[];
+ series:{offset_min:number;bpm:number|null;samples:number}[];
 };
 type Session = {
  id:number;type:string;duration_min:number;start_time:string|null;
