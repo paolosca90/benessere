@@ -164,6 +164,33 @@ def journal(kind:Literal["meals","workouts","wods","results","maxes","photos","p
             "('goal','weight_kg','height_cm','age','sex','resting_hr','sleep_need_h','body_fat_pct_estimate')")]}
     raise HTTPException(status_code=404)
 
+@router.get("/wod-library")
+def wod_library(conn=Depends(connection)):
+    """Catalogo, risultati e blocchi allenamento collegati: una sola vista coerente."""
+    catalog = [dict(row) for row in conn.execute(
+        "SELECT id,name,category,description,score_type,custom FROM wods ORDER BY name COLLATE NOCASE"
+    ).fetchall()]
+    by_id = {row["id"]: {**row, "results": []} for row in catalog}
+    results = conn.execute(
+        """SELECT wr.id,wr.wod_id,wr.date,wr.score_display,wr.score_value,
+                  wr.scaling,wr.notes,wr.is_pr,
+                  wk.id AS workout_id,wk.start_time AS workout_start_time,
+                  wk.duration_min AS workout_duration_min,wk.rpe AS workout_rpe,
+                  wk.load AS workout_load,wk.type AS workout_type,
+                  wk.notes AS workout_notes
+           FROM wod_results wr LEFT JOIN workouts wk ON wk.wod_result_id=wr.id
+           ORDER BY wr.date DESC,wr.id DESC LIMIT 300"""
+    ).fetchall()
+    for record in results:
+        item = dict(record)
+        item["blocks"] = (
+            workout_details.blocks_for(conn, item["workout_id"])
+            if item["workout_id"] is not None else []
+        )
+        if item["wod_id"] in by_id:
+            by_id[item["wod_id"]]["results"].append(item)
+    return {"items": list(by_id.values()), "result_limit": 300}
+
 @router.post("/meal",status_code=201)
 def create_meal(data:MealBody,conn=Depends(connection)):
     body=data.model_dump(exclude={"request_key"})
