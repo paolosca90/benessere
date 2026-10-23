@@ -8,6 +8,7 @@ on:
       - "app.py"
       - "app-android/**"
       - "tests/**"
+      - "deploy/vultr/deploy_wod_details_safe.sh"
       - ".github/workflows/benessere-preview-ci.yml"
   workflow_dispatch:
 permissions:
@@ -23,6 +24,8 @@ jobs:
       - name: Install test dependencies
         run: |
           pip install -r requirements.txt -r webapp/api/requirements.txt httpx==0.28.1
+      - name: Validate targeted WOD deployment script syntax
+        run: bash -n deploy/vultr/deploy_wod_details_safe.sh
       - name: Unit / API tests (no real health data)
         run: python -m pytest tests -q
 

@@ -15,58 +15,111 @@ from benessere import db, maxes, nutrition, workouts, wods
 MAX_BYTES = 65536
 
 def apply_workout_revision(conn, key: str, data: dict) -> dict:
-    """Rettifica un allenamento IMPORTATO senza creare una seconda sessione."""
+    """Rettifica in modo atomico lo stesso workout, inclusi RPE/carico e catalogo WOD."""
+    import math
     from benessere import workout_details as details
-    source=str(data.get("update_of") or "")
+    details.initialize(conn)
+    source = str(data.get("update_of") or "")
     if not source or source == key:
         raise ValueError("ID allenamento originale mancante")
-    original=conn.execute(
-        "SELECT kind,result_json FROM sheets_bridge_events WHERE event_id=?",(source,)
+    original = conn.execute(
+        "SELECT kind,result_json FROM sheets_bridge_events WHERE event_id=?", (source,)
     ).fetchone()
-    if not original or original["kind"]!="workout":
+    if not original or original["kind"] != "workout":
         raise ValueError("Evento workout originale non trovato")
-    first=json.loads(original["result_json"])
-    workout_id=first.get("workout_id")
-    wod_id=first.get("wod_result_id")
-    if not isinstance(workout_id,int):
+    first = json.loads(original["result_json"])
+    workout_id = first.get("workout_id")
+    wod_id = first.get("wod_result_id")
+    if not isinstance(workout_id, int):
         raise ValueError("Riferimento workout mancante")
-    previous=conn.execute("SELECT * FROM workouts WHERE id=?",(workout_id,)).fetchone()
-    if not previous or previous["source"]!="chatgpt_sheets":
+    previous = conn.execute("SELECT * FROM workouts WHERE id=?", (workout_id,)).fetchone()
+    if not previous or previous["source"] != "chatgpt_sheets":
         raise ValueError("Allenamento originale non modificabile")
     if data.get("date") != previous["date"]:
         raise ValueError("La data originale non puo' cambiare")
-    start_time=details.start_time_string(data["start_time"])
-    duration=float(data.get("duration_min",previous["duration_min"]))
-    if not 1 <= duration <= 360:
+
+    start_time = details.start_time_string(data["start_time"]) if "start_time" in data else previous["start_time"]
+    duration = float(data.get("duration_min", previous["duration_min"]))
+    if not math.isfinite(duration) or not 1 <= duration <= 360:
         raise ValueError("Durata sessione fuori intervallo")
-    notes=str(data.get("notes",""))
-    if not notes or len(notes)>1000:
+    notes = str(data["notes"]) if "notes" in data else str(previous["notes"] or "")
+    if not notes or len(notes) > 1000:
         raise ValueError("Note della rettifica non valide")
-    blocks=details.normalized_blocks(data["blocks"])
-    original_wod=conn.execute("SELECT * FROM wod_results WHERE id=?",(wod_id,)).fetchone() if wod_id else None
-    total=original_wod["score_value"]/60 if original_wod else None
-    warnings=details.timeline_warnings(blocks,total)
-    wod_notes=str(data.get("wod_notes",""))
-    if len(wod_notes)>1000:
+    rpe = data.get("rpe", previous["rpe"])
+    if rpe is not None:
+        if isinstance(rpe, bool) or not math.isfinite(float(rpe)) or not 1 <= float(rpe) <= 10:
+            raise ValueError("RPE fuori intervallo")
+        rpe = float(rpe)
+    load = workouts.compute_load(conn, previous["type"], duration, rpe, previous["avg_hr"])
+
+    # Do not erase already imported blocks when correcting only intensity or name.
+    blocks = details.normalized_blocks(data["blocks"]) if "blocks" in data else None
+    original_wod = conn.execute(
+        "SELECT * FROM wod_results WHERE id=?", (wod_id,)
+    ).fetchone() if wod_id else None
+    total = original_wod["score_value"] / 60 if original_wod else None
+    warnings = details.timeline_warnings(blocks, total) if blocks is not None else []
+    wod_notes = data.get("wod_notes")
+    if wod_notes is not None and len(str(wod_notes)) > 1000:
         raise ValueError("Note WOD troppo lunghe")
-    details.initialize(conn)
+    updated_wod = data.get("wod")
+    catalog_wod = None
+    proposed_name = None
+    proposed_description = None
+    if updated_wod is not None:
+        if not isinstance(updated_wod, dict) or original_wod is None:
+            raise ValueError("Dettagli WOD senza risultato associato")
+        catalog_wod = conn.execute("SELECT * FROM wods WHERE id=?", (original_wod["wod_id"],)).fetchone()
+        if catalog_wod is None:
+            raise ValueError("WOD originale non trovato")
+        if updated_wod.get("score_type", catalog_wod["score_type"]) != catalog_wod["score_type"]:
+            raise ValueError("La modalita' di punteggio non puo' cambiare")
+        if "score" in updated_wod and wods.parse_score(catalog_wod["score_type"], str(updated_wod["score"])) != original_wod["score_value"]:
+            raise ValueError("Rettifica del punteggio non supportata: deve restare identico")
+        proposed_name = str(updated_wod.get("name", catalog_wod["name"])).strip()
+        proposed_description = str(updated_wod.get("description", catalog_wod["description"]))
+        if not proposed_name or len(proposed_name) > 160 or len(proposed_description) > 1000:
+            raise ValueError("Nome o descrizione WOD non validi")
+        collision = conn.execute("SELECT id FROM wods WHERE name=? COLLATE NOCASE", (proposed_name,)).fetchone()
+        if collision is not None and collision["id"] != catalog_wod["id"]:
+            raise ValueError("Nome WOD gia' presente nel catalogo")
+        # Renaming a WOD shared by other results would silently change their names too.
+        if (proposed_name != catalog_wod["name"] or proposed_description != catalog_wod["description"]):
+            linked = conn.execute("SELECT COUNT(*) FROM wod_results WHERE wod_id=?", (catalog_wod["id"],)).fetchone()[0]
+            if linked != 1:
+                raise ValueError("WOD condiviso: impossibile modificare i metadati in blocco")
+        if wod_notes is None and "notes" in updated_wod:
+            wod_notes = str(updated_wod["notes"])
+            if len(wod_notes) > 1000:
+                raise ValueError("Note WOD troppo lunghe")
     conn.execute("BEGIN IMMEDIATE")
     try:
-        again=conn.execute("SELECT result_json FROM sheets_bridge_events WHERE event_id=?",(key,)).fetchone()
+        again = conn.execute("SELECT result_json FROM sheets_bridge_events WHERE event_id=?", (key,)).fetchone()
         if again:
             conn.rollback()
-            return {"status":"duplicate","result":json.loads(again["result_json"])}
-        conn.execute("UPDATE workouts SET start_time=?,duration_min=?,notes=?,wod_result_id=? WHERE id=?",
-                     (start_time,duration,notes,wod_id,workout_id))
-        count=details.replace_blocks_in_transaction(conn,workout_id,blocks)
-        if wod_id and wod_notes:
-            conn.execute("UPDATE wod_results SET notes=? WHERE id=?",(wod_notes,wod_id))
-        result={"workout_id":workout_id,"wod_result_id":wod_id,
-                "blocks_updated":count,"timeline_warnings":warnings}
+            return {"status": "duplicate", "result": json.loads(again["result_json"])}
+        conn.execute(
+            "UPDATE workouts SET start_time=?,duration_min=?,rpe=?,load=?,notes=?,wod_result_id=? WHERE id=?",
+            (start_time, duration, rpe, load, notes, wod_id, workout_id),
+        )
+        if blocks is not None:
+            count = details.replace_blocks_in_transaction(conn, workout_id, blocks)
+        else:
+            count = conn.execute("SELECT COUNT(*) FROM workout_blocks WHERE workout_id=?", (workout_id,)).fetchone()[0]
+        if catalog_wod is not None:
+            conn.execute("UPDATE wods SET name=?,description=? WHERE id=?",
+                         (proposed_name, proposed_description, catalog_wod["id"]))
+        if original_wod is not None and wod_notes is not None:
+            conn.execute("UPDATE wod_results SET notes=? WHERE id=?", (str(wod_notes), wod_id))
+        result = {
+            "workout_id": workout_id, "wod_result_id": wod_id, "blocks_updated": count,
+            "rpe": rpe, "load": load, "wod_name": proposed_name if catalog_wod is not None else None,
+            "timeline_warnings": warnings,
+        }
         conn.execute("INSERT INTO sheets_bridge_events(event_id,kind,result_json) VALUES(?,?,?)",
-                     (key,"workout",json.dumps(result,ensure_ascii=False)))
+                     (key, "workout", json.dumps(result, ensure_ascii=False)))
         conn.commit()
-        return {"status":"saved","result":result}
+        return {"status": "saved", "result": result}
     except Exception:
         conn.rollback()
         raise
@@ -101,6 +154,10 @@ def apply_event(conn, key: str, kind: str, data: dict) -> dict:
             existing = wods.get_wod(conn, str(wod["name"]))
             if existing and existing["score_type"] != wod["score_type"]:
                 raise ValueError("Nome WOD gia usato con score_type diverso")
+        # Crea prima le colonne di collegamento: ogni nuovo WOD deve avere la sua sessione.
+        from benessere import workout_details as details
+        details.initialize(conn)
+        clock = details.start_time_string(data["start_time"]) if data.get("start_time") is not None else None
         # Transazione atomica: nessun commit intermedio sui due inserimenti.
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -124,8 +181,8 @@ def apply_event(conn, key: str, kind: str, data: dict) -> dict:
             else:
                 wod_id = None
             load = workouts.compute_load(conn, typ, duration, float(rpe) if rpe is not None else None, None)
-            c = conn.execute("INSERT INTO workouts(date,type,duration_min,rpe,load,notes,source) VALUES(?,?,?,?,?,?,?)",
-                            (day,typ,duration,float(rpe) if rpe is not None else None,load,notes,"chatgpt_sheets"))
+            c = conn.execute("INSERT INTO workouts(date,type,duration_min,rpe,load,notes,source,start_time,wod_result_id) VALUES(?,?,?,?,?,?,?,?,?)",
+                            (day,typ,duration,float(rpe) if rpe is not None else None,load,notes,"chatgpt_sheets",clock,wod_id))
             result = {"workout_id":c.lastrowid,"wod_result_id":wod_id}
             conn.execute("INSERT INTO sheets_bridge_events(event_id,kind,result_json) VALUES(?,?,?)",(key,kind,json.dumps(result)))
             conn.commit()

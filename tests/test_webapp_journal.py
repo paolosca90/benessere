@@ -25,6 +25,7 @@ def client(tmp_path,monkeypatch):
 def test_journal_protected(client):
     c,token=client
     assert c.get("/v1/journal?kind=meals").status_code==401
+    assert c.get("/v1/wod-library").status_code==401
     assert c.post("/v1/meal",json={}).status_code==401
     assert c.get("/v1/photo/1").status_code==401
     assert c.get("/v1/journal?kind=profile",headers=token).status_code==200
@@ -104,6 +105,50 @@ def test_profile_and_workout_blocks(client):
     assert len(rows)==1 and len(rows[0]["blocks"])==1
     assert rows[0]["blocks"][0]["rpe"]==7
     assert rows[0]["blocks"][0]["reported_duration_min"] is None
+
+
+def test_wod_library_returns_full_linked_session(client):
+    c,h=client
+    wod=c.post("/v1/wod",json={
+        "name":"Final 4 Way — Team of 4","score_type":"time",
+        "description":"200 TTB, 200 DB Bench Press, 200 Hang DB Snatch, 400 DU, totali team"
+    },headers=h)
+    assert wod.status_code==201,wod.text
+    result=c.post("/v1/result",json={
+        "wod_name":"Final 4 Way — Team of 4",
+        "date":"2026-10-23","score":"25:40","scaling":"unspecified"
+    },headers=h)
+    assert result.status_code==201,result.text
+    rid=int(result.json()["id"])
+    created=c.post("/v1/workout",json={
+        "request_key":str(uuid4()),"date":"2026-10-23","type":"other",
+        "duration_min":25.6667,"start_time":"09:00","rpe":4,
+        "notes":"Squadra da quattro, ripetizioni condivise"
+    },headers=h)
+    assert created.status_code==201,created.text
+    workout_id=int(created.json()["id"])
+    with db.connect() as conn:
+        from benessere import workout_details
+        workout_details.initialize(conn)
+        conn.execute("UPDATE workouts SET wod_result_id=? WHERE id=?",(rid,workout_id))
+        conn.commit()
+    block=c.post("/v1/workout-block",json={
+        "workout_id":workout_id,"phase":"wod","label":"Team block 1",
+        "exercise":"Toes to Bar","repetitions":200,
+        "notes":"Totale squadra, non singolo atleta."
+    },headers=h)
+    assert block.status_code==201,block.text
+    library=c.get("/v1/wod-library",headers=h)
+    assert library.status_code==200,library.text
+    entry=next(w for w in library.json()["items"] if w["name"]=="Final 4 Way — Team of 4")
+    r=entry["results"][0]
+    assert r["id"]==rid
+    assert r["score_display"]=="25:40"
+    assert r["workout_id"]==workout_id
+    assert r["workout_rpe"]==4
+    assert r["workout_start_time"]=="09:00"
+    assert r["blocks"][0]["repetitions"]==200
+    assert r["blocks"][0]["exercise"]=="Toes to Bar"
 
 
 def test_journal_rejects_invalid_data(client):
