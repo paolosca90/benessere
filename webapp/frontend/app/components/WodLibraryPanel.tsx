@@ -65,7 +65,7 @@ export default function WodLibraryPanel(){
     {loading&&<div className="notice">Caricamento dei WOD registrati…</div>}
     {!loading&&!error&&visible.length===0&&<div className="empty">Nessun WOD corrispondente ai filtri. I dati non sono simulati.</div>}
     <div className="stack">
-      {visible.map((w,index)=><details key={w.id} className="card">
+      {visible.map((w,index)=><details key={w.id} className="card" defaultOpen={index===0}>
         <summary style={{cursor:"pointer",fontWeight:650,listStyle:"auto"}}>
           {w.name} · {w.results.length} {w.results.length===1?"risultato":"risultati"}
         </summary>
