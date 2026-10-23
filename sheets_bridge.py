@@ -154,6 +154,10 @@ def apply_event(conn, key: str, kind: str, data: dict) -> dict:
             existing = wods.get_wod(conn, str(wod["name"]))
             if existing and existing["score_type"] != wod["score_type"]:
                 raise ValueError("Nome WOD gia usato con score_type diverso")
+        # Crea prima le colonne di collegamento: ogni nuovo WOD deve avere la sua sessione.
+        from benessere import workout_details as details
+        details.initialize(conn)
+        clock = details.start_time_string(data["start_time"]) if data.get("start_time") is not None else None
         # Transazione atomica: nessun commit intermedio sui due inserimenti.
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -177,8 +181,8 @@ def apply_event(conn, key: str, kind: str, data: dict) -> dict:
             else:
                 wod_id = None
             load = workouts.compute_load(conn, typ, duration, float(rpe) if rpe is not None else None, None)
-            c = conn.execute("INSERT INTO workouts(date,type,duration_min,rpe,load,notes,source) VALUES(?,?,?,?,?,?,?)",
-                            (day,typ,duration,float(rpe) if rpe is not None else None,load,notes,"chatgpt_sheets"))
+            c = conn.execute("INSERT INTO workouts(date,type,duration_min,rpe,load,notes,source,start_time,wod_result_id) VALUES(?,?,?,?,?,?,?,?,?)",
+                            (day,typ,duration,float(rpe) if rpe is not None else None,load,notes,"chatgpt_sheets",clock,wod_id))
             result = {"workout_id":c.lastrowid,"wod_result_id":wod_id}
             conn.execute("INSERT INTO sheets_bridge_events(event_id,kind,result_json) VALUES(?,?,?)",(key,kind,json.dumps(result)))
             conn.commit()
