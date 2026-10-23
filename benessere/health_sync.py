@@ -113,6 +113,7 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
     # Validazione completa PRIMA di scrivere. Su errore, rollback di tutto il batch.
     days, heart_rates, sessions, oxygen_samples, weights = [], [], [], [], []
     phase_updates = []
+    skipped_stage_sessions = 0
     hrv_latest_by_day = {}
     for measurement in hrv_list:
         if not isinstance(measurement, dict):
@@ -169,8 +170,14 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
         if "stages" in s:
             if kind != "sleep":
                 raise ValueError("Fasi del sonno presenti in una sessione non-sonno")
-            intervals = sleep_stage_history.normalize(s["stages"], start, stop)
-            phase_updates.append((device_id, origin, record_id, intervals))
+            try:
+                intervals = sleep_stage_history.normalize(s["stages"], start, stop)
+            except (ValueError, TypeError):
+                # Fault isolation: a bad vendor stage interval must NOT block
+                # valid HR, sleep session, SpO2 or daily sync.
+                skipped_stage_sessions += 1
+            else:
+                phase_updates.append((device_id, origin, record_id, intervals))
         sessions.append((device_id, kind, record_id, origin,
                          start, stop, night, round(duration, 2), title, *stages, updated_at))
 
@@ -285,6 +292,7 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
             "received_sessions": len(sessions), "received_spo2": len(oxygen_samples),
             "received_weights": len(weights), "received_hrv": len(hrv_latest_by_day),
             "received_stage_intervals": sum(len(item[3]) for item in phase_updates),
+            "skipped_stage_sessions": skipped_stage_sessions,
             "synced_at": updated_at}
 
 
