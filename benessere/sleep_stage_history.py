@@ -57,7 +57,7 @@ def normalize(
         if not isinstance(item, dict):
             raise ValueError("Fase del sonno non valida")
         stage = item.get("stage")
-        if stage not in KINDS:
+        if not isinstance(stage, str) or stage not in KINDS:
             raise ValueError("Tipo fase del sonno non supportato")
         a, b = _instant(item.get("start")), _instant(item.get("end"))
         if not lower <= a < b <= upper:
