@@ -1,11 +1,12 @@
 "use client";
 import {useCallback,useEffect,useState} from "react";
-import {Activity,AlarmClock,Apple,ArrowUpRight,Bell,Dumbbell,HeartPulse,Home,LoaderCircle,Moon,RefreshCcw,Scale,ShieldCheck,TrendingUp,Utensils,Watch,WifiOff} from "lucide-react";
+import {Activity,AlarmClock,Apple,ArrowUpRight,Bell,ClipboardList,Dumbbell,HeartPulse,Home,LoaderCircle,Moon,RefreshCcw,Scale,ShieldCheck,TrendingUp,Utensils,Watch,WifiOff} from "lucide-react";
 import {ResponsiveContainer,LineChart,Line,CartesianGrid,XAxis,YAxis,Tooltip,BarChart,Bar} from "recharts";
 import JournalPanel from "./components/JournalPanel";
+import WodLibraryPanel from "./components/WodLibraryPanel";
 import LiveHeartPanel, {type LiveHeartSnapshot} from "./components/LiveHeartPanel";
 
-type Section="oggi"|"salute"|"allenamento"|"alimentazione"|"progressi"|"diario"|"sveglia";
+type Section="oggi"|"salute"|"allenamento"|"wods"|"alimentazione"|"progressi"|"diario"|"sveglia";
 type Numeric=null|number;
 type Day={date:string,steps:Numeric,weight_kg:Numeric,active_kcal:Numeric,total_kcal:Numeric,resting_hr:Numeric,source?:string};
 type Sleep={date:string,duration_h:Numeric,accuracy?:string,deep_min:Numeric,light_min:Numeric,rem_min:Numeric,source?:string};
@@ -17,9 +18,9 @@ type Summary={date:string,health:Health,nutrition:Nutrition,workouts:Workout[],a
 type Trends={daily:Day[],sleeps:Sleep[],hr_hourly:{at:string,average_bpm:number,min_bpm:number,max_bpm:number}[],hrv:{date:string,rmssd_ms:Numeric}[],last_heart:Heart|null,counts:{days:number,sleep_nights:number,heart_samples:number,hrv_nights:number},sync:{last_sync:string|null}};
 type Strength={maxes:Record<string,unknown>[]};
 type Alarm={revision:number,enabled:boolean,deadline:string,window_minutes:number,weekdays:number[],mode:string,delivery:string,updated_at:string|null,device_ack:{revision:number,installed:number,error:string,received_at:string}|null,strap_control:string};
-const labels:Record<Section,string>={oggi:"Oggi",salute:"Salute",allenamento:"Allenamento",alimentazione:"Nutrizione",progressi:"Progressi",diario:"Diario",sveglia:"Sveglia"};
-const mainSections:Section[]=["oggi","salute","allenamento","alimentazione","progressi"];
-const navIcons=[Home,HeartPulse,Dumbbell,Utensils,TrendingUp];
+const labels:Record<Section,string>={oggi:"Oggi",salute:"Salute",allenamento:"Allenamento",wods:"I miei WOD",alimentazione:"Nutrizione",progressi:"Progressi",diario:"Diario",sveglia:"Sveglia"};
+const mainSections:Section[]=["oggi","salute","allenamento","wods","alimentazione","progressi"];
+const navIcons=[Home,HeartPulse,Dumbbell,ClipboardList,Utensils,TrendingUp];
 const number=(n:Numeric,precision=0)=> n==null?"—":new Intl.NumberFormat("it-IT",{maximumFractionDigits:precision}).format(n);
 const fmt=(s:string|null|undefined)=>s?new Date(s).toLocaleString("it-IT",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"Non disponibile";
 const pct=(a:number,b:number)=>Math.max(0,Math.min(100,b>0?a/b*100:0));
@@ -194,10 +195,11 @@ export default function Page(){
      <Card><h3>Peso rilevato (kg)</h3>{trends&&<TrendsChart data={trends} kind="weight"/>}</Card>
     </div><div className="notice">Le durate senza fasi potrebbero riferirsi al tempo della sessione a letto. Le misure non sono diagnosi.</div>
    </div>}
-   {section==="allenamento"&&<div><div className="hero"><div className="eyebrow">Training log</div><h2>Ogni sessione conta.</h2><p>Storico di allenamento della giornata, carichi e RPE; i blocchi dettagliati restano consultabili nella dashboard attuale durante la migrazione.</p></div>
+   {section==="allenamento"&&<div><div className="hero"><div className="eyebrow">Training log</div><h2>Ogni sessione conta.</h2><p>Sessioni, carichi e RPE della giornata. Le schede complete dei WOD sono nella sezione dedicata.</p><button type="button" className="btn secondary" onClick={()=>setSection("wods")}>Apri i miei WOD completi <ArrowUpRight size={14}/></button></div>
      {summary?.workouts.length?summary.workouts.map(w=><Card key={w.id} className="activity"><div className="row"><h3>{humanType(w.type)}</h3><span className="pill">{number(w.duration_min)} min</span></div>
      <div className="small">Ore {w.start_time||"non indicate"} · RPE {number(w.rpe)}</div></Card>):<Empty message="Nessun allenamento in questa giornata. Non significa automaticamente riposo."/>}
    </div>}
+   {section==="wods"&&<WodLibraryPanel/>}
    {section==="alimentazione"&&<div>
     <div className="hero"><div className="eyebrow">Piano massa</div><h2>Energia adatta al tuo allenamento.</h2><p>Le quantità provengono dal diario. I target indicativi si attivano soltanto per una giornata classificata.</p></div>
     <div className="grid four">
