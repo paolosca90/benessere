@@ -90,10 +90,17 @@ def _workout_detail(workout: sqlite3.Row, points: list[dict], day: date) -> dict
     total_bins = max(1, math.ceil(duration))
     covered = len(bins)
     coverage_pct = round(covered * 100 / total_bins, 1)
-    series = [
+    observed = [
         {"offset_min": minute, "bpm": round(statistics.fmean(values), 1),
          "samples": len(values)} for minute, values in sorted(bins.items())
     ]
+    # Explicit nulls create visible gaps, never a fictitious continuous HR curve.
+    series = [
+        {"offset_min": minute,
+         "bpm": round(statistics.fmean(bins[minute]), 1) if minute in bins else None,
+         "samples": len(bins.get(minute, []))}
+        for minute in range(total_bins)
+    ] if samples else []
     hr = result["hr"]
     hr["sample_count"] = len(samples)
     hr["sampled_minutes"] = covered
@@ -111,8 +118,8 @@ def _workout_detail(workout: sqlite3.Row, points: list[dict], day: date) -> dict
     # Equal weighting of observed one-minute bins avoids over-weighting
     # high-frequency source bursts. It is not a continuous-session mean
     # unless collection is sufficiently complete.
-    hr["average_bpm"] = round(statistics.fmean(item["bpm"] for item in series), 1)
-    long_enough = (series[-1]["offset_min"] - series[0]["offset_min"] + 1) >= 0.6 * total_bins
+    hr["average_bpm"] = round(statistics.fmean(item["bpm"] for item in observed), 1)
+    long_enough = (observed[-1]["offset_min"] - observed[0]["offset_min"] + 1) >= 0.6 * total_bins
     sufficient = covered >= 6 and coverage_pct >= 60 and long_enough
     hr["status"] = "sufficient" if sufficient else "partial"
     hr["reason"] = (
