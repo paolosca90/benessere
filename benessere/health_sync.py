@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import sqlite3
 from datetime import date, datetime, timezone
+from . import sleep_stage_history
 
 MAX_SAMPLES = 50000
 MAX_EVENTS = 2500
@@ -76,6 +77,7 @@ def initialize(conn: sqlite3.Connection) -> None:
       imported_events INTEGER
     );
     """)
+    sleep_stage_history.initialize(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(sleeps)")}
     if "total_min" not in cols:
         conn.execute("ALTER TABLE sleeps ADD COLUMN total_min INTEGER")
@@ -110,6 +112,8 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
 
     # Validazione completa PRIMA di scrivere. Su errore, rollback di tutto il batch.
     days, heart_rates, sessions, oxygen_samples, weights = [], [], [], [], []
+    phase_updates = []
+    skipped_stage_sessions = 0
     hrv_latest_by_day = {}
     for measurement in hrv_list:
         if not isinstance(measurement, dict):
@@ -161,7 +165,20 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
         night = _date(s.get("night_date")) if kind == "sleep" else None
         title = str(s.get("title", ""))[:200]
         stages = [_value(s.get(k), 1440, integer=True) for k in ("deep_min", "light_min", "rem_min", "awake_min")]
-        sessions.append((device_id, kind, _id(s.get("id")), _id(s.get("origin"), "origin"),
+        record_id = _id(s.get("id"))
+        origin = _id(s.get("origin"), "origin")
+        if "stages" in s:
+            if kind != "sleep":
+                raise ValueError("Fasi del sonno presenti in una sessione non-sonno")
+            try:
+                intervals = sleep_stage_history.normalize(s["stages"], start, stop)
+            except (ValueError, TypeError):
+                # Fault isolation: a bad vendor stage interval must NOT block
+                # valid HR, sleep session, SpO2 or daily sync.
+                skipped_stage_sessions += 1
+            else:
+                phase_updates.append((device_id, origin, record_id, intervals))
+        sessions.append((device_id, kind, record_id, origin,
                          start, stop, night, round(duration, 2), title, *stages, updated_at))
 
     try:
@@ -235,6 +252,12 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
                   title=excluded.title,deep_min=excluded.deep_min,light_min=excluded.light_min,
                   rem_min=excluded.rem_min,awake_min=excluded.awake_min,updated_at=excluded.updated_at
             """, sess)
+        # Full timing is updated only if the sender actually provided 'stages'.
+        # A partial/legacy sync must NOT delete detailed intervals already stored.
+        for device, origin, record_id, intervals in phase_updates:
+            sleep_stage_history.upsert_session_in_transaction(
+                conn, device, origin, record_id, intervals
+            )
         # Scegli una singola sessione di sonno per notte: evita la somma di duplicati Zepp/telefono.
         # Nessuna conversione arbitraria del tempo a letto in "sonno leggero".
         for night in {s[6] for s in sessions if s[1] == "sleep"}:
@@ -268,6 +291,8 @@ def ingest_payload(conn: sqlite3.Connection, payload: object) -> dict:
     return {"status": "ok", "new_hr_samples": new_hr, "received_days": len(days),
             "received_sessions": len(sessions), "received_spo2": len(oxygen_samples),
             "received_weights": len(weights), "received_hrv": len(hrv_latest_by_day),
+            "received_stage_intervals": sum(len(item[3]) for item in phase_updates),
+            "skipped_stage_sessions": skipped_stage_sessions,
             "synced_at": updated_at}
 
 

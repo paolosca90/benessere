@@ -4,6 +4,7 @@ import {Activity,AlarmClock,Apple,ArrowUpRight,Bell,ClipboardList,Dumbbell,Gauge
 import {ResponsiveContainer,LineChart,Line,CartesianGrid,XAxis,YAxis,Tooltip,BarChart,Bar} from "recharts";
 import JournalPanel from "./components/JournalPanel";
 import ExertionPanel from "./components/ExertionPanel";
+import SleepHistoryPanel from "./components/SleepHistoryPanel";
 import WodLibraryPanel from "./components/WodLibraryPanel";
 import LiveHeartPanel, {type LiveHeartSnapshot} from "./components/LiveHeartPanel";
 
@@ -255,6 +256,7 @@ export default function Page(){
       <p className="small">Su Helio Strap: Zepp → Dispositivo → Helio Strap → Sveglia. La vibrazione diretta non è ancora integrata.</p>
       <div className="notice warn">Health Connect non fornisce una fase del sonno in tempo reale verificata. Per ora è disponibile soltanto l'allarme fisso sul telefono: conserva una sveglia di riserva.</div>
      </Card></div>
+    <SleepHistoryPanel/>
    </div>}
   </main>
   <nav className="mobile-nav" aria-label="Navigazione mobile">
