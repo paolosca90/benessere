@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.androidx.health.connect)
     implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.androidx.ui.tooling)
+    testImplementation("junit:junit:4.13.2")
 }
 
 // Copia l'APK nella cartella servita in LAN da `python -m http.server 8001 --directory dist`.
