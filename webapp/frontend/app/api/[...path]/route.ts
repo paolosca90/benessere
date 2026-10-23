@@ -1,7 +1,7 @@
 import {NextRequest,NextResponse} from "next/server";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
-const allowed=new Set(["summary","health-trends","strength","alarm","live-heart-rate","journal",
+const allowed=new Set(["summary","health-trends","strength","alarm","live-heart-rate","physiological-load","journal",
   "meal","workout","workout-block","max","wod","result","wod-library","photo","day-mode","profile"]);
 const kinds=new Set(["meals","workouts","wods","results","maxes","photos","profile"]);
 async function proxy(req:NextRequest,ctx:{params:Promise<{path:string[]}>},method:"GET"|"PUT"|"POST") {
@@ -20,6 +20,10 @@ async function proxy(req:NextRequest,ctx:{params:Promise<{path:string[]}>},metho
  try {
   const url=new URL("/v1/"+path.join("/"),base);
   if(method==="GET"){
+   if(path[0]==="physiological-load"){
+    const day=req.nextUrl.searchParams.get("day");
+    if(day&&/^\d{4}-\d{2}-\d{2}$/.test(day))url.searchParams.set("day",day);
+   }
    if(path[0]==="health-trends"){
     const days=req.nextUrl.searchParams.get("days");
     if(days&&/^\d+$/.test(days))url.searchParams.set("days",days);
