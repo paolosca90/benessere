@@ -38,8 +38,47 @@ function Item({title,detail,children}:{title:string,detail?:string,children?:Rea
  return <div className="activity"><div className="row" style={{alignItems:"start"}}>
   <div><b>{title}</b>{detail&&<div className="small">{detail}</div>}{children}</div></div></div>;
 }
+function shortDate(value:unknown){
+ const text=String(value||"");
+ const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+ return match?match[3]+"/"+match[2]+"/"+match[1]:text;
+}
+function shortWodName(value:unknown){
+ const title=String(value||"WOD");
+ return title.length>52?title.slice(0,49).trimEnd()+"…":title;
+}
+function WodBoard({record}:{record:Row}){
+ const blocks=Array.isArray(record.blocks)?record.blocks.filter((b):b is Row=>!!b&&typeof b==="object"):[];
+ const rpe=record.rpe==null?"":` · RPE ${number(record.rpe)}/10`;
+ const duration=record.duration_min==null?"":` · ${number(record.duration_min)} min`;
+ return <article className="wod-sheet">
+  <header className="wod-sheet-head">
+   <div><div className="wod-sheet-kicker">Scheda allenamento</div><h4>{shortDate(record.date)} · {workoutLabels[String(record.type)]||"CrossFit"}</h4></div>
+   <div className="wod-sheet-summary">{duration.replace(/^ · /,"")}{rpe}</div>
+  </header>
+  {blocks.length?<div className="wod-sheet-grid">{blocks.map((block,i)=>{
+   const label=String(block.label||"");
+   const explicit=/^([A-Z])\s*[·.:-]/.exec(label);
+   const letter=explicit?explicit[1]:String.fromCharCode(65+i);
+   const heading=explicit?label.replace(/^[A-Z]\s*[·.:-]\s*/,""):label||"Blocco";
+   const reps=block.repetitions==null?null:(block.sets!=null?`${number(block.sets)} × ${number(block.repetitions)} rep`:`${number(block.repetitions)} rep`);
+   const weight=block.weight_kg!=null?`${number(block.weight_kg)} kg`:null;
+   const minutes=block.reported_duration_min!=null?`${number(block.reported_duration_min)} min`:null;
+   const notes=String(block.notes||"");
+   return <section className="wod-step" key={String(block.id||i)}>
+    <div className="wod-step-head"><span className="wod-step-letter">{letter}</span><b>{heading}</b></div>
+    <div className="wod-step-movement">{String(block.exercise||"Esercizio non indicato")}</div>
+    <div className="wod-step-stats">
+      {reps&&<span>{reps}</span>}{weight&&<span>{weight}</span>}{minutes&&<span>{minutes}</span>}
+    </div>
+    {notes&&<div className="wod-step-note">{notes}</div>}
+   </section>;
+  })}</div>:<div className="wod-no-blocks">I blocchi A–D non sono ancora stati salvati in formato strutturato.</div>}
+  {record.notes&&<details className="wod-more"><summary>Note complete e dettagli tecnici</summary><p>{String(record.notes)}</p></details>}
+ </article>;
+}
 export default function JournalPanel({changed}:{changed:()=>void}){
- const [category,setCategory]=useState<Kind>("meals");
+ const [category,setCategory]=useState<Kind>("workouts");
  const [day,setDay]=useState(today);
  const [items,setItems]=useState<Row[]>([]);
  const [wodNames,setWodNames]=useState<Row[]>([]);
@@ -248,21 +287,20 @@ export default function JournalPanel({changed}:{changed:()=>void}){
      </div>}
    </section>
    <section className="card">
-    <h3><ClipboardList size={16}/> Archivio · {kindInfo.find(x=>x.id===category)?.label}</h3>
+    <h3><ClipboardList size={16}/> {category==="workouts"?"Schede per giornata":"Archivio · "+kindInfo.find(x=>x.id===category)?.label}</h3>
     {items.length===0?<div className="empty">Nessun record disponibile. Nessun dato dimostrativo.</div>:
      <div style={{maxHeight:700,overflowY:"auto"}}>
      {items.slice(0,120).map((x,i)=>{
       if(category==="meals")return <Item key={String(x.ts||i)} title={mealLabels[String(x.meal)]||String(x.meal)} detail={String(x.description||"")}>
        <div className="small">{number(x.kcal)} kcal · P {number(x.protein_g)} · C {number(x.carbs_g)} · G {number(x.fat_g)}</div></Item>;
-      if(category==="workouts")return <Item key={String(x.id||i)} title={workoutLabels[String(x.type)]||String(x.type)} detail={String(x.date)+" · "+number(x.duration_min)+" min · RPE "+number(x.rpe)}>
-       <div className="small">{String(x.notes||"")}</div>{Array.isArray(x.blocks)&&x.blocks.map((b:any,j:number)=><div key={j} className="small" style={{marginTop:4}}>
-       {String(b.label||"")} · {String(b.exercise||"")} · {number(b.weight_kg)} kg · RPE {number(b.rpe)}</div>)}</Item>;
+      if(category==="workouts")return <WodBoard key={String(x.id||i)} record={x}/>;
       if(category==="maxes")return <Item key={String(x.id||i)} title={String(x.lift||"")} detail={String(x.date||"")+" · "+String(x.category||"")} >
        <div className="small">{number(x.weight_kg)} kg · {number(x.reps)} rep</div></Item>;
-      if(category==="wods")return <Item key={String(x.id||i)} title={String(x.name||"")} detail={String(x.score_type||"")}>
-       <div className="small">{String(x.description||"")}</div></Item>;
-      if(category==="results")return <Item key={String(x.id||i)} title={String(x.wod||"")} detail={String(x.date||"")+" · "+String(x.scaling||"")}>
-       <div className="small">Risultato: {String(x.score_display||"")} {x.is_pr?"· PR":""}</div></Item>;
+      if(category==="wods")return <Item key={String(x.id||i)} title={shortWodName(x.name)} detail={String(x.score_type||"")}>
+       <details className="wod-more"><summary>Movimenti e schema completo</summary>
+       <p>{String(x.description||"Nessuna descrizione.")}</p></details></Item>;
+      if(category==="results")return <Item key={String(x.id||i)} title={shortDate(x.date)+" · "+shortWodName(x.wod)} detail={"Risultato: "+String(x.score_display||"")+" · "+String(x.scaling||"")}>
+       {x.is_pr?<div className="small">Record personale</div>:null}</Item>;
       if(category==="profile")return <Item key={String(x.key||i)} title={String(x.key||"")} detail={String(x.value||"")}/>;
       if(category==="photos")return <div className="activity" key={String(x.id||i)}>
        <div className="small">{String(x.taken_on||"")} · {String(x.angle||"")}</div>
