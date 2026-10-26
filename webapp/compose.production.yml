@@ -1,0 +1,60 @@
+# Switch controllato Streamlit -> Next.js. Stesso Caddy e DB in produzione.
+# Il vecchio container viene rinominato e lasciato spento dallo script.
+# FastAPI non è pubblicata su nessuna porta host.
+services:
+  benessere-api-v2:
+    image: benessere-api-v2:preview
+    pull_policy: never
+    container_name: benessere-api-v2
+    restart: unless-stopped
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 100
+    mem_limit: 220m
+    cpus: 0.5
+    env_file:
+      - /opt/benessere/private/webapp.preview.env
+    environment:
+      BENESSERE_DB: /app/data/benessere.db
+      HOME: /tmp
+      TZ: Europe/Rome
+    volumes:
+      - /opt/benessere/data:/app/data:rw
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    networks: [benessere_internal]
+  benessere-dashboard:
+    image: benessere-pwa-preview:preview
+    pull_policy: never
+    container_name: benessere-dashboard
+    restart: unless-stopped
+    read_only: true
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 120
+    mem_limit: 280m
+    cpus: 0.75
+    env_file:
+      - /opt/benessere/private/webapp.preview.env
+    environment:
+      NODE_ENV: production
+      PORT: "8501"
+      HOSTNAME: "0.0.0.0"
+      BENESSERE_API_INTERNAL_URL: http://benessere-api-v2:8780
+      HOME: /tmp
+      TZ: Europe/Rome
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    networks: [benessere_internal, existing_proxy]
+    depends_on:
+      - benessere-api-v2
+
+networks:
+  benessere_internal:
+    internal: true
+  existing_proxy:
+    external: true
+    name: app_default

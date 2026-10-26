@@ -33,10 +33,18 @@ import javax.crypto.spec.SecretKeySpec
  */
 class HuamiBleClient(private val context: Context) {
 
+    data class DiscoveredDevice(
+        val address: String,
+        val name: String,
+        val rssi: Int,
+        val lastSeenMillis: Long,
+    )
+
     interface Listener {
         fun onLog(line: String)
         fun onHeartRate(bpm: Int)
         fun onAuthResult(success: Boolean)
+        fun onDeviceFound(device: DiscoveredDevice) {}
     }
 
     var listener: Listener? = null
@@ -44,7 +52,16 @@ class HuamiBleClient(private val context: Context) {
     private var adapter: BluetoothAdapter? = null
     private var gatt: BluetoothGatt? = null
     private var authKey: ByteArray = ByteArray(16)
+    private var standardHeartOnly: Boolean = false
     private var scanCallback: ScanCallback? = null
+    private val seen = mutableMapOf<String, DiscoveredDevice>()
+    private val lastPublished = mutableMapOf<String, Long>()
+    private val scanTimeout = Runnable {
+        if (scanCallback != null) {
+            stopScan()
+            log("Scansione terminata dopo 25 secondi. Ripeti solo se necessario.")
+        }
+    }
 
     private fun log(line: String) {
         mainHandler.post { listener?.onLog(line) }
@@ -52,6 +69,9 @@ class HuamiBleClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun startScan() {
+        stopScan()
+        seen.clear()
+        lastPublished.clear()
         val btManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         adapter = btManager?.adapter
         val scanner = adapter?.bluetoothLeScanner ?: run {
@@ -60,32 +80,48 @@ class HuamiBleClient(private val context: Context) {
         }
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
-                val name = result.device.name ?: return
-                if (name.contains("Helio", ignoreCase = true) ||
-                    name.contains("Amazfit", ignoreCase = true) ||
-                    name.contains("Mi Band", ignoreCase = true) ||
-                    name.contains("CooSpo", ignoreCase = true) ||
-                    name.contains("Polar", ignoreCase = true)
-                ) {
-                    log("Trovato: $name [${result.device.address}]")
+                val name = result.scanRecord?.deviceName ?: result.device.name ?: return
+                if (!name.contains("Helio", ignoreCase = true) &&
+                    !name.contains("Amazfit", ignoreCase = true) &&
+                    !name.contains("Mi Band", ignoreCase = true) &&
+                    !name.contains("CooSpo", ignoreCase = true) &&
+                    !name.contains("Polar", ignoreCase = true)) return
+
+                // Un advertising BLE ricompare molte volte: mostra UNA riga per indirizzo.
+                // L'indirizzo BLE può essere temporaneo: non prova l'identità dello Strap.
+                val address = result.device.address
+                val now = android.os.SystemClock.elapsedRealtime()
+                val prior = seen[address]
+                val updated = DiscoveredDevice(address, name, result.rssi, now)
+                seen[address] = updated
+                if (prior == null) {
+                    log("Dispositivo rilevato: $name — indirizzo $address")
+                }
+                if (prior == null || now - (lastPublished[address] ?: 0L) > 3000L) {
+                    lastPublished[address] = now
+                    mainHandler.post { listener?.onDeviceFound(updated) }
                 }
             }
 
             override fun onScanFailed(errorCode: Int) {
-                log("Scansione fallita (errore $errorCode)")
+                scanCallback = null
+                mainHandler.removeCallbacks(scanTimeout)
+                log("Scansione non riuscita (codice $errorCode). Attendi prima di riprovare.")
             }
         }
         scanCallback = callback
-        log("Scansione BLE avviata…")
+        log("Scansione BLE avviata per 25 secondi…")
         scanner.startScan(callback)
+        mainHandler.removeCallbacks(scanTimeout)
+        mainHandler.postDelayed(scanTimeout, 25_000L)
     }
 
     @SuppressLint("MissingPermission")
     fun stopScan() {
+        mainHandler.removeCallbacks(scanTimeout)
         val callback = scanCallback ?: return
-        adapter?.bluetoothLeScanner?.stopScan(callback)
         scanCallback = null
-        log("Scansione fermata")
+        adapter?.bluetoothLeScanner?.stopScan(callback)
     }
 
     /**
@@ -95,6 +131,7 @@ class HuamiBleClient(private val context: Context) {
      */
     @SuppressLint("MissingPermission")
     fun connect(macAddress: String, keyHex: String) {
+        standardHeartOnly = false
         val key = runCatching { hexToBytes(keyHex) }.getOrNull()
         if (key == null || key.size != 16) {
             log("Chiave di pairing non valida: servono 32 cifre esadecimali (docs/06 per estrarla)")
@@ -111,8 +148,30 @@ class HuamiBleClient(private val context: Context) {
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
 
+    /** Connessione BLE read-only al profilo cardiaco standard 180D.
+     * Non usa chiavi Zepp, non scrive comandi proprietari e può non essere
+     * disponibile sullo Strap. Attivare "Heart Rate Push" in Zepp, se previsto.
+     */
+    @SuppressLint("MissingPermission")
+    fun connectStandardHeartRate(address: String) {
+        stopScan()
+        gatt?.close()
+        gatt = null
+        standardHeartOnly = true
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        adapter = manager?.adapter
+        val target = runCatching { adapter?.getRemoteDevice(address) }.getOrNull()
+        if (target == null) {
+            log("Indirizzo BLE non valido o dispositivo non disponibile")
+            return
+        }
+        log("Verifico il servizio cardiaco standard (sola lettura)...")
+        gatt = target.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+    }
+
     @SuppressLint("MissingPermission")
     fun disconnect() {
+        stopScan()
         gatt?.disconnect()
         gatt?.close()
         gatt = null
@@ -139,6 +198,18 @@ class HuamiBleClient(private val context: Context) {
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 log("Discovery servizi fallita (status=$status)")
+                return
+            }
+            if (standardHeartOnly) {
+                val hr = g.getService(HuamiProtocol.SERVICE_HEART_RATE)
+                    ?.getCharacteristic(HuamiProtocol.CHARACTERISTIC_HEART_RATE_MEASUREMENT)
+                if (hr == null) {
+                    log("Questo dispositivo non espone il servizio FC standard 180D. " +
+                        "Lo streaming Helio via trasporto Zepp FED0 non è ancora supportato.")
+                    return
+                }
+                enableNotifications(g, hr)
+                log("Servizio FC standard trovato; ascolto i dati, senza scrivere sullo Strap.")
                 return
             }
             val fee1 = g.getService(HuamiProtocol.SERVICE_MIBAND2)

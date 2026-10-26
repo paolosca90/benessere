@@ -47,6 +47,7 @@ import com.benessere.app.ble.HuamiBleClient
 import com.benessere.app.health.HealthConnectReader
 import com.benessere.app.health.HealthSyncClient
 import com.benessere.app.health.HealthSyncScheduler
+import com.benessere.app.health.LiveHeartUploader
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -82,8 +83,8 @@ fun BenessereApp() {
     val scroll = rememberScrollState()
 
     // ---- permessi runtime ----
-    val btPermissions = mutableListOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-    if (Build.VERSION.SDK_INT >= 33) btPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
+    // Le notifiche (necessarie per la sveglia) sono indipendenti dalla scansione BLE.
+    val btPermissions = listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
     var permissionsGranted by remember {
         mutableStateOf(btPermissions.all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -104,13 +105,13 @@ fun BenessereApp() {
     suspend fun refreshHealthConnect() {
         val r = reader ?: return
         try {
-            hcGranted = r.hasAllPermissions()
+            hcGranted = r.hasAnyPermissions()
             if (hcGranted) {
                 hcSnapshot = r.snapshot()
-                hcMessage = ""
+                hcMessage = r.permissionSummary()
             } else {
                 hcSnapshot = null
-                hcMessage = "Permessi Health Connect mancanti o incompleti: premi Permessi e consenti tutte le letture richieste."
+                hcMessage = "Nessun permesso Health Connect concesso. Autorizza almeno le categorie che desideri sincronizzare."
             }
         } catch (e: Exception) {
             hcSnapshot = null
@@ -133,7 +134,16 @@ fun BenessereApp() {
     val hcContract = remember(reader) { reader?.permissionContract }
     val bgLauncher = if (hcContract != null) {
         rememberLauncherForActivityResult(hcContract) { _ ->
-            scope.launch { refreshHealthConnect() }
+            scope.launch {
+                refreshHealthConnect()
+                try {
+                    val enabled = HealthSyncClient.autoEnabled(context) &&
+                        (reader?.backgroundGranted() == true)
+                    HealthSyncScheduler.configure(context, enabled)
+                } catch (e: Exception) {
+                    hcMessage = "Programmazione oraria: ${e.message ?: "non disponibile"}"
+                }
+            }
         }
     } else null
     val hcLauncher: androidx.activity.compose.ManagedActivityResultLauncher<Set<String>, Set<String>>? =
@@ -148,9 +158,16 @@ fun BenessereApp() {
     // ---- BLE ----
     val bleClient = remember { HuamiBleClient(context) }
     val bleLog = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val bleDevices = remember { androidx.compose.runtime.mutableStateMapOf<String, HuamiBleClient.DiscoveredDevice>() }
     var liveHr by remember { mutableStateOf<Int?>(null) }
+    val liveUploader = remember { LiveHeartUploader(context) }
+    var liveUploadEnabled by remember { mutableStateOf(liveUploader.enabled()) }
+    var liveUploadStatus by remember { mutableStateOf("Invio disattivato. I battiti sono visibili solo sul telefono.") }
     DisposableEffect(Unit) {
-        onDispose { runCatching { bleClient.disconnect() } }
+        onDispose {
+            runCatching { bleClient.disconnect() }
+            liveUploader.close()
+        }
     }
 
     Column(
@@ -165,7 +182,7 @@ fun BenessereApp() {
 
         if (!permissionsGranted) {
             Button(onClick = { permissionLauncher.launch(btPermissions.toTypedArray()) }) {
-                Text("Concedi permessi (Bluetooth + notifiche)")
+                Text("Concedi permessi Bluetooth")
             }
         }
 
@@ -179,7 +196,7 @@ fun BenessereApp() {
                         scope.launch {
                             try {
                                 if (reader.hasAllPermissions()) {
-                                    hcMessage = "Permessi già concessi. Usa Aggiorna per leggere i dati oppure Gestisci Health Connect per modificarli."
+                                    hcMessage = "Permessi già concessi per tutte le categorie."
                                 } else {
                                     hcMessage = "Richiesta autorizzazioni Health Connect in corso…"
                                     if (hcLauncher == null) {
@@ -212,8 +229,8 @@ fun BenessereApp() {
                     StatLine("Campioni FC oggi", s.heartRateSamples.toString())
                     StatLine("Ultima FC", s.lastHeartRate?.let { "$it bpm" } ?: "—")
                     StatLine("Sonno ultima notte", s.lastNightSleepMinutes?.let { "${it / 60}h ${it % 60}m" } ?: "—")
-                    StatLine("Allenamenti oggi", s.exercisesToday.toString())
-                    StatLine("Passi oggi", s.stepsToday.toString())
+                    StatLine("Allenamenti oggi", s.exercisesToday?.toString() ?: "— (permesso mancante)")
+                    StatLine("Passi oggi", s.stepsToday?.toString() ?: "— (permesso mancante)")
                     StatLine("Calorie totali oggi", s.totalCaloriesToday?.let { "%.0f kcal".format(it) } ?: "—")
                     StatLine("SpO2 ultimo", s.spo2Last?.let { "%.0f%%".format(it) } ?: "—")
                     StatLine("Peso ultimo", s.weightLastKg?.let { "%.1f kg".format(it) } ?: "—")
@@ -257,7 +274,7 @@ fun BenessereApp() {
                 lifecycle?.addObserver(observer)
                 onDispose { lifecycle?.removeObserver(observer) }
             }
-            Text("Server sul PC o VPS. Nessuna trasmissione finché non configuri indirizzo e token.")
+            Text("Server sul PC o VPS. Nessuna trasmissione finché non configuri indirizzo e token. Permessi parziali: vengono sincronizzate solo le misure autorizzate.")
             OutlinedTextField(
                 value = backendUrl, onValueChange = { backendUrl = it },
                 label = { Text("URL backend (es. http://192.168.1.100:8766)") },
@@ -323,15 +340,53 @@ fun BenessereApp() {
             var key by remember { mutableStateOf("") }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
+                    bleLog.clear()
+                    bleDevices.clear()
                     bleClient.listener = object : HuamiBleClient.Listener {
                         override fun onLog(line: String) { bleLog.add(0, line); if (bleLog.size > 50) bleLog.removeAt(bleLog.size - 1) }
-                        override fun onHeartRate(bpm: Int) { liveHr = bpm }
+                        override fun onHeartRate(bpm: Int) {
+                            liveHr = bpm
+                            val inForeground = (context as? ComponentActivity)?.lifecycle
+                                ?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true
+                            if (liveUploadEnabled && inForeground) {
+                                liveUploader.offer(bpm) { liveUploadStatus = it }
+                            }
+                        }
                         override fun onAuthResult(success: Boolean) {}
+                        override fun onDeviceFound(device: HuamiBleClient.DiscoveredDevice) {
+                            bleDevices[device.address] = device
+                        }
                     }
                     if (permissionsGranted) bleClient.startScan() else permissionLauncher.launch(btPermissions.toTypedArray())
                 }) { Text("Scansiona") }
                 Button(onClick = { bleClient.disconnect() }) { Text("Disconnetti") }
             }
+            Text("Dispositivi unici rilevati: ${bleDevices.size}. Lo stesso indirizzo non viene più mostrato a ogni segnale BLE.")
+            bleDevices.values.sortedByDescending { it.rssi }.forEach { device ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${device.name} · ${device.address} · ${device.rssi} dBm",
+                        modifier = Modifier.weight(1f))
+                    Button(enabled = permissionsGranted, onClick = {
+                        bleClient.connectStandardHeartRate(device.address)
+                    }) { Text("FC standard") }
+                }
+            }
+            Text("Gli indirizzi BLE possono essere temporanei. «FC standard» legge solo il profilo cardiaco 180D; il trasporto Zepp FED0 non è necessario per questa lettura.")
+            Row {
+                Checkbox(
+                    checked = liveUploadEnabled,
+                    onCheckedChange = { checked ->
+                        liveUploader.setEnabled(checked)
+                        liveUploadEnabled = checked
+                        liveUploadStatus = if (checked)
+                            "Invio attivo soltanto mentre questa schermata è aperta e la FC Bluetooth arriva. Richiede indirizzo HTTPS e token server configurati."
+                        else "Invio FC live disattivato."
+                    }
+                )
+                Text("Invia FC Bluetooth live alla dashboard (consenso esplicito)")
+            }
+            Text(liveUploadStatus, style = MaterialTheme.typography.bodySmall)
+            Text("Massimo 1 campione ogni 3 secondi. La dashboard lo mostra per pochi minuti, separato dai dati Health Connect.")
             liveHr?.let { Text("FC live: $it bpm", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary) }
             OutlinedTextField(
                 value = mac, onValueChange = { mac = it },
@@ -343,10 +398,11 @@ fun BenessereApp() {
                 label = { Text("Chiave di pairing (32 cifre hex — docs/06)") },
                 modifier = Modifier.fillMaxWidth(), singleLine = true
             )
+            Text("Connessione Huami legacy (non Helio Zepp OS), sperimentale: evita di inserire chiavi Zepp se non indispensabile.")
             Button(
                 onClick = { bleClient.connect(mac.trim(), key.trim()) },
                 enabled = permissionsGranted && mac.isNotBlank() && key.isNotBlank()
-            ) { Text("Connetti e autentica") }
+            ) { Text("Connetti legacy (sperimentale)") }
             Column {
                 bleLog.take(12).forEach { line ->
                     Text("• $line", style = MaterialTheme.typography.bodySmall)
@@ -355,7 +411,23 @@ fun BenessereApp() {
         }
 
         // ---- Scheda sveglia ----
-        SectionCard("Sveglia intelligente (L1)") {
+        SectionCard("Sveglia sincronizzata dal web") {
+            var alarmStatus by remember { mutableStateOf(SmartAlarmScheduler.configuredStatus(context)) }
+            Text("La web app salva l'orario e i giorni; il telefono deve scaricare e applicare le impostazioni. L'Helio Strap non viene comandato da Benessere.")
+            Text(alarmStatus, color=MaterialTheme.colorScheme.secondary)
+            Button(onClick = {
+                scope.launch {
+                    alarmStatus = "Sincronizzazione sveglia in corso…"
+                    alarmStatus = try {
+                        HealthSyncClient.syncAlarm(context)
+                    } catch(e: Exception) {
+                        "Errore: " + (e.message ?: e.javaClass.simpleName)
+                    }
+                }
+            }) { Text("Applica sveglia dalla web app") }
+        }
+
+        SectionCard("Sveglia sul telefono (manuale)") {
             var startField by remember { mutableStateOf("06:30") }
             var endField by remember { mutableStateOf("07:00") }
             var stepField by remember { mutableStateOf("10") }
@@ -376,7 +448,7 @@ fun BenessereApp() {
                 Button(onClick = { SmartAlarmScheduler.cancelAll(context) }) { Text("Annulla") }
             }
             Text(
-                "L1 = sveglie multiple nella finestra prevista. L2 (FC live nella finestra) arriva col modulo BLE.",
+                "L1: il telefono programma solo la sveglia all’orario massimo. La finestra non determina ancora una fase di sonno leggera. La vibrazione dell’Helio Strap va configurata in Zepp.",
                 style = MaterialTheme.typography.bodySmall
             )
         }

@@ -1,6 +1,7 @@
 package com.benessere.app.health
 
 import android.content.Context
+import com.benessere.app.alarm.SmartAlarmScheduler
 import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -52,7 +53,7 @@ object HealthSyncClient {
         }
     }
 
-    private fun deviceId(context: Context): String {
+    fun deviceId(context: Context): String {
         val p = prefs(context)
         val existing = p.getString("device_id", null)
         if (!existing.isNullOrBlank()) return existing
@@ -87,12 +88,62 @@ object HealthSyncClient {
             if (answer.optString("status") != "ok") throw IllegalStateException("Risposta server non valida")
             val status = "OK: ${answer.optInt("new_hr_samples")} nuove FC, " +
                 "${answer.optInt("received_sessions")} sessioni, " +
-                "${answer.optInt("received_days")} giorni • ${answer.optString("synced_at")}"
+                "${answer.optInt("received_days")} giorni, " +
+                "${answer.optInt("received_hrv")} HRV, " +
+                "${answer.optInt("received_spo2")} SpO2 • ${answer.optString("synced_at")}"
             prefs(context).edit().putString("last_status", status).apply()
             status
         } finally {
             conn.disconnect()
         }
+    }
+
+    /** Applica sul telefono la configurazione salvata via web.
+     * Questo avviene esplicitamente alla pressione del pulsante.
+     */
+    suspend fun syncAlarm(context: Context): String = withContext(Dispatchers.IO) {
+        val base=server(context)
+        val secret=token(context)
+        validateUrl(base,allowLocalHttp(context))
+        require(secret.length>=24) { "Token server non configurato" }
+        val connection=URL(base+"/api/v1/alarm-config").openConnection() as HttpURLConnection
+        val cfg=try {
+            connection.connectTimeout=10000
+            connection.readTimeout=10000
+            connection.setRequestProperty("Authorization","Bearer "+secret)
+            val code=connection.responseCode
+            if(code!=200) error("Lettura sveglia: HTTP "+code)
+            JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        } finally { connection.disconnect() }
+
+        // Si conferma solo una programmazione locale effettivamente accettata.
+        val outcome=try {
+            SmartAlarmScheduler.applyRemote(context,cfg)
+        } catch(e:Exception) {
+            sendAlarmAck(base,secret,deviceId(context),cfg.getInt("revision"),false,
+                (e.message ?: "errore programmazione").take(180))
+            throw e
+        }
+        sendAlarmAck(base,secret,deviceId(context),cfg.getInt("revision"),true,"")
+        outcome
+    }
+
+    private fun sendAlarmAck(base:String,secret:String,device:String,
+                            revision:Int,installed:Boolean,errorMessage:String) {
+        val conn=URL(base+"/api/v1/alarm-ack").openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod="POST"
+            conn.connectTimeout=10000
+            conn.readTimeout=10000
+            conn.doOutput=true
+            conn.setRequestProperty("Authorization","Bearer "+secret)
+            conn.setRequestProperty("Content-Type","application/json")
+            val payload=JSONObject().put("device_id",device)
+                .put("revision",revision).put("installed",installed)
+                .put("error",errorMessage).toString()
+            conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+            check(conn.responseCode==200) { "Conferma server rifiutata (HTTP "+conn.responseCode+")" }
+        } finally { conn.disconnect() }
     }
 
     fun recordError(context: Context, error: String) {
