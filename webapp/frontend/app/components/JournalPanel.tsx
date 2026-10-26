@@ -74,7 +74,7 @@ function WodBoard({record}:{record:Row}){
     {notes&&<div className="wod-step-note">{notes}</div>}
    </section>;
   })}</div>:<div className="wod-no-blocks">I blocchi A–D non sono ancora stati salvati in formato strutturato.</div>}
-  {record.notes&&<details className="wod-more"><summary>Note complete e dettagli tecnici</summary><p>{String(record.notes)}</p></details>}
+  {Boolean(record.notes)&&<details className="wod-more"><summary>Note complete e dettagli tecnici</summary><p>{String(record.notes)}</p></details>}
  </article>;
 }
 export default function JournalPanel({changed}:{changed:()=>void}){
