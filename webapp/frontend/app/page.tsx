@@ -2,7 +2,7 @@
 import {useCallback,useEffect,useState} from "react";
 import {Activity,AlarmClock,Apple,ArrowUpRight,Bell,Dumbbell,HeartPulse,Home,LoaderCircle,Moon,RefreshCcw,Scale,ShieldCheck,TrendingUp,Utensils,Watch,WifiOff} from "lucide-react";
 import {ResponsiveContainer,LineChart,Line,CartesianGrid,XAxis,YAxis,Tooltip,BarChart,Bar} from "recharts";
-import JournalPanel from "./components/JournalPanel";
+import JournalPanel, {WodBoard} from "./components/JournalPanel";
 import LiveHeartPanel, {type LiveHeartSnapshot} from "./components/LiveHeartPanel";
 
 type Section="oggi"|"salute"|"allenamento"|"alimentazione"|"progressi"|"diario"|"sveglia";
@@ -66,6 +66,7 @@ function TrendsChart({data,kind}:{data:Trends,kind:"heart"|"sleep"|"steps"|"weig
 export default function Page(){
  const [section,setSection]=useState<Section>("oggi");
  const [summary,setSummary]=useState<Summary|null>(null);
+ const [sessionDetails,setSessionDetails]=useState<Record<string,unknown>[]>([]);
  const [liveHeart,setLiveHeart]=useState<LiveHeartSnapshot|null>(null);
  const [lastUpdated,setLastUpdated]=useState<Date|null>(null);
  const [trends,setTrends]=useState<Trends|null>(null);
@@ -86,6 +87,12 @@ export default function Page(){
      api<Alarm>("/api/alarm")
    ]);
    setSummary(s);setTrends(h);setStrength(p);setAlarm(a);setLastUpdated(new Date());setError("");
+   // Carica i blocchi A-D senza far fallire il riepilogo se lo storico è temporaneamente non disponibile.
+   try {
+    const detail=await api<{items:Record<string,unknown>[]}>("/api/journal?kind=workouts&day="+encodeURIComponent(s.date));
+    setSessionDetails(Array.isArray(detail.items)?detail.items:[]);
+   } catch {setSessionDetails([]);}
+ 
   }catch(e){setError(e instanceof Error?e.message:"Errore sconosciuto");}
   finally{setLoading(false);}
  },[days]);
@@ -194,9 +201,11 @@ export default function Page(){
      <Card><h3>Peso rilevato (kg)</h3>{trends&&<TrendsChart data={trends} kind="weight"/>}</Card>
     </div><div className="notice">Le durate senza fasi potrebbero riferirsi al tempo della sessione a letto. Le misure non sono diagnosi.</div>
    </div>}
-   {section==="allenamento"&&<div><div className="hero"><div className="eyebrow">Training log</div><h2>Ogni sessione conta.</h2><p>Storico di allenamento della giornata, carichi e RPE; i blocchi dettagliati restano consultabili nella dashboard attuale durante la migrazione.</p></div>
-     {summary?.workouts.length?summary.workouts.map(w=><Card key={w.id} className="activity"><div className="row"><h3>{humanType(w.type)}</h3><span className="pill">{number(w.duration_min)} min</span></div>
-     <div className="small">Ore {w.start_time||"non indicate"} · RPE {number(w.rpe)}</div></Card>):<Empty message="Nessun allenamento in questa giornata. Non significa automaticamente riposo."/>}
+   {section==="allenamento"&&<div><div className="hero"><div className="eyebrow">Scheda CrossFit</div><h2>I tuoi allenamenti, blocco per blocco.</h2><p>Schema della lavagna, carichi e risultati. Le note tecniche rimangono espandibili.</p></div>
+     {sessionDetails.length?sessionDetails.map(w=><WodBoard key={String(w.id)} record={w}/>):
+      summary?.workouts.length?summary.workouts.map(w=><Card key={w.id} className="activity"><div className="row"><h3>{humanType(w.type)}</h3><span className="pill">{number(w.duration_min)} min</span></div>
+      <div className="small">Ore {w.start_time||"non indicate"} · RPE {number(w.rpe)}</div></Card>):
+      <Empty message="Nessun allenamento in questa giornata. Non significa automaticamente riposo."/>}
    </div>}
    {section==="alimentazione"&&<div>
     <div className="hero"><div className="eyebrow">Piano massa</div><h2>Energia adatta al tuo allenamento.</h2><p>Le quantità provengono dal diario. I target indicativi si attivano soltanto per una giornata classificata.</p></div>
