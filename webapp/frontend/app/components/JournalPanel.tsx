@@ -47,7 +47,7 @@ function shortWodName(value:unknown){
  const title=String(value||"WOD");
  return title.length>52?title.slice(0,49).trimEnd()+"…":title;
 }
-function WodBoard({record}:{record:Row}){
+export function WodBoard({record}:{record:Row}){
  const blocks=Array.isArray(record.blocks)?record.blocks.filter((b):b is Row=>!!b&&typeof b==="object"):[];
  const rpe=record.rpe==null?"":` · RPE ${number(record.rpe)}/10`;
  const duration=record.duration_min==null?"":` · ${number(record.duration_min)} min`;
